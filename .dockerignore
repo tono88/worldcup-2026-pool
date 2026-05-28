@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+**/node_modules
+**/dist
+functions/lib
+coverage
+.firebase
+secrets
+.env
+.env.*
+npm-debug.log*
+yarn-error.log*

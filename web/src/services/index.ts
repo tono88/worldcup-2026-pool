@@ -2,6 +2,22 @@ export { fetchMatches, getMatch, refreshMatches } from './matchService';
 export type { Match, MatchesData } from './matchService';
 
 export {
+  DEFAULT_SCORING_SETTINGS,
+  DEFAULT_TOURNAMENT_START_AT,
+  getScoringSettings,
+  getTournamentStartAt,
+  isScoringLocked,
+  normalizeScoringSettings,
+  saveScoringSettings,
+  subscribeToScoringSettings,
+} from './scoringService';
+export type {
+  BonusRuleType,
+  BonusScoringRule,
+  ScoringSettings,
+} from './scoringService';
+
+export {
   checkUsernameAvailable,
   deleteUserAccount,
   getUserByUsername,

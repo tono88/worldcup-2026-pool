@@ -101,6 +101,62 @@
       }
     },
 
+    // App settings - public read, admin write only before tournament kickoff
+    "settings": {
+      ".read": true,
+      "scoring": {
+        ".write": "auth != null && root.child('users').child(auth.uid).child('admin').val() === true && ((!data.exists() && now < newData.child('tournamentStartAt').val()) || (data.exists() && now < data.child('tournamentStartAt').val()))",
+        ".validate": "newData.hasChildren(['exactScorePoints', 'correctResultPoints', 'scoreDifferencePenalty', 'minimumCorrectResultPoints', 'wrongResultPoints', 'tournamentStartAt'])",
+        "exactScorePoints": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99"
+        },
+        "correctResultPoints": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99"
+        },
+        "scoreDifferencePenalty": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99"
+        },
+        "minimumCorrectResultPoints": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99"
+        },
+        "wrongResultPoints": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99"
+        },
+        "bonusRules": {
+          "$ruleId": {
+            ".validate": "newData.hasChildren(['type', 'label', 'points', 'enabled'])",
+            "type": {
+              ".validate": "newData.isString() && (newData.val() === 'correctHomeScore' || newData.val() === 'correctAwayScore' || newData.val() === 'correctGoalDifference')"
+            },
+            "label": {
+              ".validate": "newData.isString()"
+            },
+            "points": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99"
+            },
+            "enabled": {
+              ".validate": "newData.isBoolean()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "tournamentStartAt": {
+          ".validate": "newData.isNumber() && newData.val() > 0 && (!data.exists() || newData.val() === data.val())"
+        },
+        "updatedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "updatedBy": {
+          ".validate": "newData.isString()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+
     // Default deny all other paths
     "$other": {
       ".read": false,

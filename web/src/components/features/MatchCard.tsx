@@ -33,16 +33,18 @@ export const MatchCard = ({
     hour: '2-digit',
     minute: '2-digit',
   });
-  const isPlayed = match.homeScore >= 0 && match.awayScore >= 0;
+  const hasScore = match.homeScore >= 0 && match.awayScore >= 0;
+  const isFinished =
+    match.status === 'finished' ||
+    ((!match.status || match.status === 'unknown') && hasScore);
   const cutoffTime = match.timestamp * 1000 - 10 * 60 * 1000; // 10 mins before kickoff
   const predictionsClosed = Date.now() > cutoffTime;
 
-  // Match is live if it started but hasn't finished (assume ~2.5 hours for a full match)
-  // TODO: Implement this properly (check FIFA API)
   const kickoffTime = match.timestamp * 1000;
   const matchEndEstimate = kickoffTime + 150 * 60 * 1000; // 2.5 hours after kickoff
   const isLive =
-    !isPlayed && Date.now() >= kickoffTime && Date.now() < matchEndEstimate;
+    match.status === 'live' ||
+    (!isFinished && Date.now() >= kickoffTime && Date.now() < matchEndEstimate);
   const canPredict = isOwnProfile && userId && !predictionsClosed;
 
   const [homePrediction, setHomePrediction] = React.useState<string>(
@@ -97,7 +99,11 @@ export const MatchCard = ({
     day: 'numeric',
   });
 
-  const showPoints = isPlayed && prediction;
+  const showPoints = hasScore && prediction;
+  const isExactPrediction =
+    showPoints &&
+    match.homeScore === prediction.homePrediction &&
+    match.awayScore === prediction.awayPrediction;
 
   return (
     <Card className="p-4 hover:bg-white/10 transition-colors after:hidden">
@@ -116,7 +122,7 @@ export const MatchCard = ({
               {match.homeName}
             </span>
             <span className={scoreClass}>
-              {isPlayed ? match.homeScore : '-'}
+              {hasScore ? match.homeScore : '-'}
             </span>
             {canPredict && (
               <input
@@ -159,7 +165,7 @@ export const MatchCard = ({
               {match.awayName}
             </span>
             <span className={scoreClass}>
-              {isPlayed ? match.awayScore : '-'}
+              {hasScore ? match.awayScore : '-'}
             </span>
             {canPredict && (
               <input
@@ -202,7 +208,7 @@ export const MatchCard = ({
             }`}
           >
             <span className="flex-1 flex items-center text-2xl">
-              {prediction.points === 15
+              {isExactPrediction
                 ? '🥳'
                 : prediction.points > 0
                   ? '😄'

@@ -16,8 +16,9 @@ Join the action live at **[worldcup-2026.web.app](https://worldcup-2026.web.app/
 - 🏆 Global and private league leaderboards
 - 👥 Create and join private leagues with invite links
 - 📱 PWA support (installable on mobile)
-- 🎯 Points system: exact score (15pts), correct result (max 10pts), wrong result (0pts)
+- 🎯 Configurable points system: exact score (15pts), correct result (max 10pts), wrong result (0pts) by default
 - ⏰ Prediction deadline: 10 minutes before kickoff
+- Live score sync through Firebase Functions or the CasaOS Docker worker
 
 ## Tech Stack
 
@@ -173,6 +174,55 @@ firebase deploy --only hosting
 # Deploy only functions
 firebase deploy --only functions
 ```
+
+## Docker / CasaOS
+
+This project can be run in CasaOS with Docker Compose. The web container serves
+the Vite build through Nginx. The optional `score-worker` container polls the
+FIFA match API every minute and writes scores/points to Firebase using a service
+account.
+
+1. Copy the Docker environment template:
+
+```bash
+cp docker.env.example .env
+```
+
+2. Fill in the Firebase web values and `FIREBASE_DATABASE_URL`.
+
+3. Create a Firebase service account JSON in Firebase Console and save it at:
+
+```text
+secrets/firebase-service-account.json
+```
+
+4. Start the stack:
+
+```bash
+docker compose up -d --build
+```
+
+By default the app is exposed on `http://localhost:8080`. In CasaOS, use the
+contents of `docker-compose.yml` as a custom app compose file and provide the
+same environment values.
+
+If you deploy Firebase Functions instead, `updateMatchScores` already runs every
+minute in Firebase. Do not run both the Firebase scheduled function and the
+CasaOS `score-worker` unless you intentionally want redundant polling.
+
+## Scoring Rules
+
+Admins can open `/rules` before tournament kickoff and change:
+
+- Exact score points
+- Correct result max points
+- Penalty per missed goal
+- Minimum correct result points
+- Wrong result points
+- Bonus rules for correct home score, correct away score, or correct goal difference
+
+The initial values keep the original scoring system. Once `tournamentStartAt`
+is reached, Firebase Database rules block further changes to scoring settings.
 
 ## Code Conventions
 

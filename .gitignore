@@ -73,6 +73,10 @@ web_modules/
 .env.*
 !.env.example
 
+# Local Docker/Firebase secrets
+secrets/
+*-service-account.json
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

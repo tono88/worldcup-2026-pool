@@ -8,6 +8,7 @@ const COMPETITION_ID = '17'; // FIFA World Cup
 export interface Match {
   game: number;
   fifaId: string;
+  status?: MatchStatus;
   round: string;
   group: string | null;
   date: string;
@@ -26,6 +27,8 @@ export interface Match {
 export interface MatchesData {
   [key: string]: Match;
 }
+
+export type MatchStatus = 'scheduled' | 'live' | 'finished' | 'unknown';
 
 interface FifaApiMatch {
   IdMatch: string;
@@ -49,11 +52,79 @@ interface FifaApiMatch {
   };
   PlaceHolderA: string;
   PlaceHolderB: string;
+  MatchStatus?: unknown;
+  Status?: unknown;
+  MatchTime?: unknown;
+  Period?: unknown;
 }
 
 interface FifaApiResponse {
   Results: FifaApiMatch[];
 }
+
+const readStatusText = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(readStatusText).filter(Boolean).join(' ');
+  }
+
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return [
+      record.Description,
+      record.Name,
+      record.Status,
+      record.MatchStatus,
+      record.Phase,
+    ]
+      .map(readStatusText)
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  return '';
+};
+
+const normalizeStatus = (fifaMatch: FifaApiMatch): MatchStatus => {
+  const statusText = [
+    fifaMatch.MatchStatus,
+    fifaMatch.Status,
+    fifaMatch.MatchTime,
+    fifaMatch.Period,
+  ]
+    .map(readStatusText)
+    .join(' ')
+    .toLowerCase();
+
+  if (
+    /\b(finished|final|full.?time|completed|closed|ft|aet|pen)\b/.test(
+      statusText
+    )
+  ) {
+    return 'finished';
+  }
+
+  if (
+    /\b(live|progress|half|halftime|1h|2h|extra|penalty|started)\b/.test(
+      statusText
+    )
+  ) {
+    return 'live';
+  }
+
+  if (/\b(scheduled|not started|fixture|ns|tbd)\b/.test(statusText)) {
+    return 'scheduled';
+  }
+
+  return 'unknown';
+};
 
 /**
  * Fetch matches from the FIFA API and transform them
@@ -70,7 +141,7 @@ const fetchFromFifaApi = async (): Promise<MatchesData> => {
   }
 
   const data = (await response.json()) as FifaApiResponse;
-  return transformFifaData(data.Results);
+  return transformFifaData(data.Results ?? []);
 };
 
 /**
@@ -92,6 +163,7 @@ const transformFifaData = (results: FifaApiMatch[]): MatchesData => {
     matches[String(game)] = {
       game,
       fifaId: item.IdMatch,
+      status: normalizeStatus(item),
       round,
       group,
       date: item.Date,

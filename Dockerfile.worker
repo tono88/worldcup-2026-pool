@@ -1,0 +1,22 @@
+FROM node:22-alpine AS build
+
+WORKDIR /app/functions
+
+COPY functions/package*.json ./
+RUN npm ci
+
+COPY functions/tsconfig.json ./
+COPY functions/src ./src
+RUN npm run build
+RUN npm prune --omit=dev
+
+FROM node:22-alpine
+
+ENV NODE_ENV=production
+WORKDIR /app/functions
+
+COPY --from=build /app/functions/package*.json ./
+COPY --from=build /app/functions/node_modules ./node_modules
+COPY --from=build /app/functions/lib ./lib
+
+CMD ["npm", "run", "worker"]
