@@ -10,6 +10,7 @@ type MatchesByDayProps = {
   isOwnProfile?: boolean;
   userId?: string;
   predictions?: UserPredictions;
+  predictionDeadlineMinutes?: number;
 };
 
 export const MatchesByDay = ({
@@ -17,6 +18,7 @@ export const MatchesByDay = ({
   isOwnProfile,
   userId,
   predictions,
+  predictionDeadlineMinutes,
 }: MatchesByDayProps) => {
   // Group matches by date (day)
   const groupedByDay = Object.values(matches).reduce<Record<string, Match[]>>(
@@ -62,6 +64,7 @@ export const MatchesByDay = ({
                   isOwnProfile={isOwnProfile}
                   userId={userId}
                   prediction={predictions?.[match.game]}
+                  predictionDeadlineMinutes={predictionDeadlineMinutes}
                 />
               ))}
           </div>

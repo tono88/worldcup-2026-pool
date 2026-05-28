@@ -10,6 +10,7 @@ type MatchesByGroupProps = {
   isOwnProfile?: boolean;
   userId?: string;
   predictions?: UserPredictions;
+  predictionDeadlineMinutes?: number;
 };
 
 export const MatchesByGroup = ({
@@ -17,6 +18,7 @@ export const MatchesByGroup = ({
   isOwnProfile,
   userId,
   predictions,
+  predictionDeadlineMinutes,
 }: MatchesByGroupProps) => {
   // Group matches by group (or round if group is null)
   const groupedMatches = Object.values(matches).reduce<Record<string, Match[]>>(
@@ -66,6 +68,7 @@ export const MatchesByGroup = ({
                   isOwnProfile={isOwnProfile}
                   userId={userId}
                   prediction={predictions?.[match.game]}
+                  predictionDeadlineMinutes={predictionDeadlineMinutes}
                 />
               ))}
           </div>

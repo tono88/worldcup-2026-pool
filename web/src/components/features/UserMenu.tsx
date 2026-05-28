@@ -20,7 +20,7 @@ type UserMenuProps = {
 
 export const UserMenu = ({ mobile = false }: UserMenuProps) => {
   const navigate = useNavigate();
-  const { user, userData, signIn, signOut } = useAuth();
+  const { user, userData, signOut } = useAuth();
   const { selectedLeague, leagueMemberIds } = useLeague();
   const [isOpen, setIsOpen] = React.useState(false);
   const [allUsers, setAllUsers] = React.useState<UserWithId[]>([]);
@@ -91,10 +91,7 @@ export const UserMenu = ({ mobile = false }: UserMenuProps) => {
 
   const handleSignIn = () => {
     justSignedIn.current = true;
-    signIn().catch((error) => {
-      justSignedIn.current = false;
-      console.error(error);
-    });
+    void navigate('/signin');
   };
 
   // Show sign in button if not authenticated
@@ -209,6 +206,17 @@ export const UserMenu = ({ mobile = false }: UserMenuProps) => {
                     </Link>
                   </li>
                 </>
+              )}
+              {userData?.admin && (
+                <li>
+                  <Link
+                    to="/admin"
+                    onClick={closeMenu}
+                    className={menuItemClass}
+                  >
+                    <span>Admin</span>
+                  </Link>
+                </li>
               )}
               <li>
                 <Link

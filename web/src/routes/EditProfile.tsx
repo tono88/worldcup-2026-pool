@@ -29,6 +29,10 @@ export const EditProfile = () => {
   const [displayName, setDisplayName] = React.useState(
     userData?.displayName ?? ''
   );
+  const [twoFactorEnabled, setTwoFactorEnabled] = React.useState(
+    userData?.twoFactorEnabled ?? false
+  );
+  const [newPassword, setNewPassword] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -45,7 +49,8 @@ export const EditProfile = () => {
   React.useEffect(() => {
     setUserName(userData?.userName ?? '');
     setDisplayName(userData?.displayName ?? '');
-  }, [userData?.userName, userData?.displayName]);
+    setTwoFactorEnabled(userData?.twoFactorEnabled ?? false);
+  }, [userData?.userName, userData?.displayName, userData?.twoFactorEnabled]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -128,7 +133,12 @@ export const EditProfile = () => {
 
       await updateUserProfile(
         user.uid,
-        { userName: finalUserName, displayName },
+        {
+          userName: finalUserName,
+          displayName,
+          twoFactorEnabled,
+          password: newPassword || undefined,
+        },
         originalUserName
       );
 
@@ -138,8 +148,10 @@ export const EditProfile = () => {
           userName: finalUserName,
           displayName,
           photoURL: newPhotoURL,
+          twoFactorEnabled,
         });
       }
+      setNewPassword('');
       void navigate(`/${finalUserName}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to update profile');
@@ -185,6 +197,7 @@ export const EditProfile = () => {
 
   const isFormValid =
     userName.length >= 3 &&
+    (newPassword.length === 0 || newPassword.length >= 6) &&
     usernameStatus !== 'taken' &&
     usernameStatus !== 'reserved' &&
     usernameStatus !== 'checking';
@@ -307,6 +320,41 @@ export const EditProfile = () => {
                   Letters, numbers, periods, hyphens, and underscores only.
                 </p>
               </div>
+
+              <div>
+                <label htmlFor="newPassword" className={labelClass}>
+                  New Password
+                </label>
+                <input
+                  id="newPassword"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Leave blank to keep current password"
+                  className={inputClass}
+                  autoComplete="new-password"
+                  minLength={6}
+                />
+              </div>
+
+              <label className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/5 p-3 text-white/80">
+                <input
+                  type="checkbox"
+                  checked={twoFactorEnabled}
+                  onChange={(event) =>
+                    setTwoFactorEnabled(event.target.checked)
+                  }
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block font-semibold text-white">
+                    Require login code
+                  </span>
+                  <span className="text-sm text-white/55">
+                    Send a second verification code when this account logs in.
+                  </span>
+                </span>
+              </label>
 
               {error && <p className="text-red-400 text-sm">{error}</p>}
 

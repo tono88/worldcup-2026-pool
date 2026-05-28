@@ -25,6 +25,9 @@ export interface UserData {
   photoURL: string;
   score: number;
   admin: boolean;
+  role?: 'admin' | 'user';
+  emailVerified?: boolean;
+  twoFactorEnabled?: boolean;
 }
 
 export const RESERVED_USERNAMES = [
@@ -106,6 +109,9 @@ export const handleUserLogin = async (user: User) => {
       photoURL: user.photoURL || '',
       score: 0,
       admin: isFirstUser,
+      role: isFirstUser ? 'admin' : 'user',
+      emailVerified: user.emailVerified,
+      twoFactorEnabled: false,
     };
 
     // Save user data and claim username atomically (store normalized version in index)
@@ -169,7 +175,12 @@ const generateUniqueUsername = async (
 
 export const updateUserProfile = async (
   uid: string,
-  data: { userName: string; displayName: string },
+  data: {
+    userName: string;
+    displayName: string;
+    twoFactorEnabled?: boolean;
+    password?: string;
+  },
   oldUserName?: string
 ) => {
   const newUserName = sanitizeUsername(data.userName);
@@ -180,6 +191,8 @@ export const updateUserProfile = async (
     await localApi.updateUserProfile(uid, {
       userName: newUserName,
       displayName: data.displayName,
+      twoFactorEnabled: data.twoFactorEnabled,
+      password: data.password,
     });
     return;
   }
@@ -206,6 +219,9 @@ export const updateUserProfile = async (
   await update(userRef, {
     userName: newUserName,
     displayName: data.displayName,
+    ...(data.twoFactorEnabled !== undefined && {
+      twoFactorEnabled: data.twoFactorEnabled,
+    }),
   });
 };
 
@@ -279,6 +295,43 @@ export const uploadProfilePicture = async (
 export interface UserWithId extends UserData {
   id: string;
 }
+
+export const getAdminUsers = async (adminId: string): Promise<UserWithId[]> => {
+  if (isLocalBackend) {
+    return localApi.getAdminUsers(adminId);
+  }
+
+  const usersRef = ref(db, 'users');
+  const snapshot = await get(usersRef);
+  const data = snapshot.val() as Record<string, UserData> | null;
+  if (!data) return [];
+  return Object.entries(data)
+    .map(([id, user]) => ({ id, ...user }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+};
+
+export const updateUserRole = async (
+  adminId: string,
+  userId: string,
+  role: 'admin' | 'user'
+): Promise<UserWithId[]> => {
+  if (isLocalBackend) {
+    return localApi.updateUserRole(adminId, userId, role);
+  }
+
+  if (role === 'admin') {
+    const usersSnapshot = await get(ref(db, 'users'));
+    const users = usersSnapshot.val() as Record<string, UserData> | null;
+    const updates: Record<string, boolean | string> = {};
+    for (const id of Object.keys(users ?? {})) {
+      updates[`users/${id}/admin`] = id === userId;
+      updates[`users/${id}/role`] = id === userId ? 'admin' : 'user';
+    }
+    await update(ref(db), updates);
+  }
+
+  return getAdminUsers(adminId);
+};
 
 /**
  * Subscribe to all users with real-time updates, sorted by score descending.

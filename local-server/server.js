@@ -15,6 +15,33 @@ const UPDATE_INTERVAL_SECONDS = Number(
   process.env.FIFA_UPDATE_INTERVAL_SECONDS || 60
 );
 
+const DEFAULT_FORMULA_RULES = {
+  'correct-winner': {
+    type: 'correctWinner',
+    label: 'Adivinar equipo ganador',
+    points: 1,
+    enabled: true,
+  },
+  'goal-difference': {
+    type: 'correctGoalDifference',
+    label: 'Predecir distancia de goles',
+    points: 2,
+    enabled: true,
+  },
+  'exact-score': {
+    type: 'exactScore',
+    label: 'Resultado exacto',
+    points: 3,
+    enabled: true,
+  },
+  'correct-draw': {
+    type: 'correctDraw',
+    label: 'Empate correcto',
+    points: 3,
+    enabled: true,
+  },
+};
+
 const DEFAULT_SCORING = {
   exactScorePoints: 15,
   correctResultPoints: 10,
@@ -22,6 +49,8 @@ const DEFAULT_SCORING = {
   minimumCorrectResultPoints: 0,
   wrongResultPoints: 0,
   bonusRules: {},
+  formulaRules: DEFAULT_FORMULA_RULES,
+  predictionDeadlineMinutes: 10,
   tournamentStartAt: Date.parse('2026-06-11T19:00:00.000Z'),
 };
 
@@ -81,7 +110,37 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    readAt INTEGER
+  );
 `);
+
+const tableHasColumn = (tableName, columnName) =>
+  db
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all()
+    .some((column) => column.name === columnName);
+
+const ensureColumn = (tableName, columnName, definition) => {
+  if (!tableHasColumn(tableName, columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+};
+
+ensureColumn('users', 'passwordHash', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('users', 'emailVerified', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'verificationCode', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('users', 'verificationExpiresAt', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'twoFactorEnabled', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('users', 'twoFactorCode', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('users', 'twoFactorExpiresAt', 'INTEGER NOT NULL DEFAULT 0');
 
 const json = (res, status, data) => {
   const body = data === undefined ? '' : JSON.stringify(data);
@@ -148,18 +207,132 @@ const generateInviteCode = () => {
   return code;
 };
 
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+const toFiniteInteger = (
+  value,
+  fallback,
+  minimum = 0,
+  maximum = Number.MAX_SAFE_INTEGER
+) => {
+  const number = Math.floor(Number(value));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(maximum, Math.max(minimum, number));
+};
+
+const hashPassword = (password, salt = crypto.randomBytes(16).toString('hex')) => {
+  const hash = crypto
+    .pbkdf2Sync(String(password), salt, 120000, 32, 'sha256')
+    .toString('hex');
+  return `${salt}:${hash}`;
+};
+
+const verifyPassword = (password, storedHash) => {
+  if (!storedHash || !storedHash.includes(':')) return false;
+  const [salt, expectedHash] = storedHash.split(':');
+  const actualHash = hashPassword(password, salt).split(':')[1];
+  if (actualHash.length !== expectedHash.length) return false;
+  return crypto.timingSafeEqual(
+    Buffer.from(actualHash, 'hex'),
+    Buffer.from(expectedHash, 'hex')
+  );
+};
+
+const generateSecurityCode = () =>
+  crypto.randomInt(100000, 1000000).toString();
+
 const getWinner = (home, away) => {
   if (home > away) return 'home';
   if (home < away) return 'away';
   return 'tied';
 };
 
+const normalizeFormulaRules = (rules) => {
+  if (!rules || typeof rules !== 'object') return DEFAULT_FORMULA_RULES;
+
+  const allowedTypes = new Set([
+    'correctWinner',
+    'correctGoalDifference',
+    'exactScore',
+    'correctDraw',
+  ]);
+  const normalizedRules = {};
+
+  for (const [ruleId, rule] of Object.entries(rules)) {
+    if (!ruleId || !rule || typeof rule !== 'object') continue;
+    if (!allowedTypes.has(rule.type)) continue;
+
+    normalizedRules[ruleId] = {
+      type: rule.type,
+      label:
+        typeof rule.label === 'string' && rule.label.trim()
+          ? rule.label.trim().slice(0, 80)
+          : rule.type,
+      points: toFiniteInteger(rule.points, 0, 0, 99),
+      enabled: rule.enabled !== false,
+    };
+  }
+
+  return Object.keys(normalizedRules).length > 0
+    ? normalizedRules
+    : DEFAULT_FORMULA_RULES;
+};
+
+const normalizeScoring = (settings) => ({
+  ...DEFAULT_SCORING,
+  ...(settings || {}),
+  exactScorePoints: toFiniteInteger(
+    settings?.exactScorePoints,
+    DEFAULT_SCORING.exactScorePoints,
+    0,
+    99
+  ),
+  correctResultPoints: toFiniteInteger(
+    settings?.correctResultPoints,
+    DEFAULT_SCORING.correctResultPoints,
+    0,
+    99
+  ),
+  scoreDifferencePenalty: toFiniteInteger(
+    settings?.scoreDifferencePenalty,
+    DEFAULT_SCORING.scoreDifferencePenalty,
+    0,
+    99
+  ),
+  minimumCorrectResultPoints: toFiniteInteger(
+    settings?.minimumCorrectResultPoints,
+    DEFAULT_SCORING.minimumCorrectResultPoints,
+    0,
+    99
+  ),
+  wrongResultPoints: toFiniteInteger(
+    settings?.wrongResultPoints,
+    DEFAULT_SCORING.wrongResultPoints,
+    0,
+    99
+  ),
+  formulaRules: normalizeFormulaRules(settings?.formulaRules),
+  predictionDeadlineMinutes: toFiniteInteger(
+    settings?.predictionDeadlineMinutes,
+    DEFAULT_SCORING.predictionDeadlineMinutes,
+    0,
+    10080
+  ),
+  tournamentStartAt: toFiniteInteger(
+    settings?.tournamentStartAt,
+    DEFAULT_SCORING.tournamentStartAt,
+    1
+  ),
+});
+
 const getScoring = () => {
   const row = db
     .prepare("SELECT value FROM settings WHERE key = 'scoring'")
     .get();
-  if (!row) return DEFAULT_SCORING;
-  return { ...DEFAULT_SCORING, ...JSON.parse(row.value) };
+  if (!row) return normalizeScoring(DEFAULT_SCORING);
+  return normalizeScoring(JSON.parse(row.value));
 };
 
 const setScoring = (settings) => {
@@ -167,12 +340,56 @@ const setScoring = (settings) => {
   if (Date.now() >= current.tournamentStartAt) {
     throw new Error('Scoring settings are locked');
   }
-  const next = { ...DEFAULT_SCORING, ...settings };
+  const next = normalizeScoring(settings);
   db.prepare(
     "INSERT OR REPLACE INTO settings (key, value) VALUES ('scoring', ?)"
   ).run(JSON.stringify(next));
   recalculateAllPredictionPoints();
 };
+
+const ruleMatches = (
+  rule,
+  homeScore,
+  awayScore,
+  homePrediction,
+  awayPrediction
+) => {
+  if (!rule.enabled) return false;
+
+  switch (rule.type) {
+    case 'correctWinner':
+      return (
+        getWinner(homeScore, awayScore) !== 'tied' &&
+        getWinner(homeScore, awayScore) ===
+          getWinner(homePrediction, awayPrediction)
+      );
+    case 'correctGoalDifference':
+      return homeScore - awayScore === homePrediction - awayPrediction;
+    case 'exactScore':
+      return homeScore === homePrediction && awayScore === awayPrediction;
+    case 'correctDraw':
+      return (
+        getWinner(homeScore, awayScore) === 'tied' &&
+        getWinner(homePrediction, awayPrediction) === 'tied'
+      );
+    default:
+      return false;
+  }
+};
+
+const calculateFormulaPoints = (
+  homeScore,
+  awayScore,
+  homePrediction,
+  awayPrediction,
+  settings
+) =>
+  Object.values(settings.formulaRules || {}).reduce((points, rule) => {
+    if (!ruleMatches(rule, homeScore, awayScore, homePrediction, awayPrediction)) {
+      return points;
+    }
+    return Math.max(points, rule.points);
+  }, 0);
 
 const getBonusRulePoints = (
   rule,
@@ -204,6 +421,16 @@ const calculatePoints = (
   settings = getScoring()
 ) => {
   if (homeScore < 0 || awayScore < 0) return 0;
+
+  if (settings.formulaRules) {
+    return calculateFormulaPoints(
+      homeScore,
+      awayScore,
+      homePrediction,
+      awayPrediction,
+      settings
+    );
+  }
 
   let points = settings.wrongResultPoints;
   if (homeScore === homePrediction && awayScore === awayPrediction) {
@@ -242,6 +469,9 @@ const userToData = (user) => ({
   photoURL: user.photoURL,
   score: user.score,
   admin: Boolean(user.admin),
+  role: user.admin ? 'admin' : 'user',
+  emailVerified: Boolean(user.emailVerified),
+  twoFactorEnabled: Boolean(user.twoFactorEnabled),
 });
 
 const toLocalUser = (user) => ({
@@ -253,11 +483,111 @@ const toLocalUser = (user) => ({
 
 const getUser = (id) => db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 
+const getUserByIdentifier = (identifier) => {
+  const normalizedIdentifier = normalizeEmail(identifier);
+  const normalizedUsername = sanitizeUsername(identifier);
+  return db
+    .prepare(
+      `SELECT * FROM users
+       WHERE LOWER(email) = ? OR userName = ?
+       LIMIT 1`
+    )
+    .get(normalizedIdentifier, normalizedUsername);
+};
+
 const getUsers = () =>
   db
     .prepare('SELECT * FROM users ORDER BY score DESC, displayName ASC')
     .all()
     .map((user) => ({ id: user.id, ...userToData(user) }));
+
+const requireAdmin = (userId) => {
+  const user = getUser(userId);
+  if (!user || !user.admin) {
+    throw new Error('Admin access is required');
+  }
+  return user;
+};
+
+const sessionPayload = (user) => ({
+  user: toLocalUser(user),
+  userData: userToData(user),
+});
+
+const createNotification = (userId, type, title, message) => {
+  db.prepare(
+    `INSERT INTO notifications
+      (id, userId, type, title, message, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(crypto.randomUUID(), userId, type, title, message, Date.now());
+  return message;
+};
+
+const issueEmailVerification = (user) => {
+  const code = generateSecurityCode();
+  const expiresAt = Date.now() + 30 * 60 * 1000;
+  db.prepare(
+    `UPDATE users
+     SET verificationCode = ?, verificationExpiresAt = ?
+     WHERE id = ?`
+  ).run(code, expiresAt, user.id);
+  const message = `Verification code for ${user.email}: ${code}`;
+  console.info(`[local email] ${message}`);
+  createNotification(
+    user.id,
+    'email-verification',
+    'Verify your email',
+    message
+  );
+  return code;
+};
+
+const issueTwoFactorCode = (user) => {
+  const code = generateSecurityCode();
+  const expiresAt = Date.now() + 10 * 60 * 1000;
+  db.prepare(
+    `UPDATE users
+     SET twoFactorCode = ?, twoFactorExpiresAt = ?
+     WHERE id = ?`
+  ).run(code, expiresAt, user.id);
+  const message = `Two-factor login code for ${user.email}: ${code}`;
+  console.info(`[local email] ${message}`);
+  createNotification(user.id, 'two-factor', 'Login code', message);
+  return code;
+};
+
+const ensureDefaultAdmin = () => {
+  const existingAdmin = db
+    .prepare('SELECT * FROM users WHERE userName = ?')
+    .get('admin');
+  const adminId = existingAdmin?.id || 'local-admin';
+  const passwordHash = hashPassword('admin');
+
+  if (!existingAdmin) {
+    db.prepare(
+      `INSERT INTO users
+        (id, email, displayName, userName, photoURL, score, admin, createdAt,
+         passwordHash, emailVerified)
+       VALUES (?, ?, ?, ?, '', 0, 1, ?, ?, 1)`
+    ).run(adminId, 'admin@local.app', 'Admin', 'admin', Date.now(), passwordHash);
+  } else {
+    db.prepare(
+      `UPDATE users
+       SET email = ?, displayName = ?, admin = 1, emailVerified = 1,
+           passwordHash = CASE WHEN passwordHash = '' THEN ? ELSE passwordHash END
+       WHERE id = ?`
+    ).run(
+      existingAdmin.email || 'admin@local.app',
+      existingAdmin.displayName || 'Admin',
+      passwordHash,
+      adminId
+    );
+  }
+
+  db.prepare('UPDATE users SET admin = CASE WHEN id = ? THEN 1 ELSE 0 END').run(
+    adminId
+  );
+};
 
 const rebuildUserScore = (userId) => {
   const row = db
@@ -539,21 +869,140 @@ const getLeagueByCode = (code) => {
 const handleApi = async (req, res, url) => {
   const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
 
-  if (req.method === 'POST' && url.pathname === '/api/auth/local') {
+  if (req.method === 'POST' && url.pathname === '/api/auth/register') {
     const body = await readBody(req);
+    const email = normalizeEmail(body.email);
+    const password = String(body.password || '');
     const displayName = String(body.displayName || '').trim();
-    if (!displayName) return text(res, 400, 'Display name is required');
+    const userName = sanitizeUsername(body.userName || email.split('@')[0]);
 
-    const count = db.prepare('SELECT COUNT(*) AS total FROM users').get();
+    if (!isValidEmail(email)) return text(res, 400, 'Valid email is required');
+    if (password.length < 6) {
+      return text(res, 400, 'Password must be at least 6 characters');
+    }
+    if (!displayName) return text(res, 400, 'Display name is required');
+    if (userName.length < 3) return text(res, 400, 'Username is required');
+    if (userName === 'admin') return text(res, 400, 'Username is reserved');
+
+    const existingEmail = db
+      .prepare('SELECT id FROM users WHERE LOWER(email) = ?')
+      .get(email);
+    if (existingEmail) return text(res, 409, 'Email is already registered');
+
+    const existingUserName = db
+      .prepare('SELECT id FROM users WHERE userName = ?')
+      .get(userName);
+    if (existingUserName) return text(res, 409, 'Username is already taken');
+
     const id = crypto.randomUUID();
-    const userName = ensureUniqueUsername(displayName);
     db.prepare(
       `INSERT INTO users
-        (id, displayName, userName, admin, createdAt)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(id, displayName, userName, count.total === 0 ? 1 : 0, Date.now());
+        (id, email, displayName, userName, admin, createdAt, passwordHash,
+         emailVerified)
+       VALUES (?, ?, ?, ?, 0, ?, ?, 0)`
+    ).run(id, email, displayName, userName, Date.now(), hashPassword(password));
+
     const user = getUser(id);
-    return json(res, 200, { user: toLocalUser(user), userData: userToData(user) });
+    const verificationCode = issueEmailVerification(user);
+    return json(res, 200, {
+      status: 'verificationRequired',
+      userId: id,
+      email,
+      verificationCode,
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/login') {
+    const body = await readBody(req);
+    const user = getUserByIdentifier(body.identifier || body.email || '');
+    const password = String(body.password || '');
+
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      return text(res, 401, 'Invalid email/username or password');
+    }
+
+    if (!user.emailVerified) {
+      const verificationCode = issueEmailVerification(user);
+      return json(res, 200, {
+        status: 'verificationRequired',
+        userId: user.id,
+        email: user.email,
+        verificationCode,
+      });
+    }
+
+    if (user.twoFactorEnabled) {
+      const verificationCode = issueTwoFactorCode(user);
+      return json(res, 200, {
+        status: 'twoFactorRequired',
+        userId: user.id,
+        email: user.email,
+        verificationCode,
+      });
+    }
+
+    return json(res, 200, {
+      status: 'authenticated',
+      ...sessionPayload(user),
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/verify-email') {
+    const body = await readBody(req);
+    const user = getUserByIdentifier(body.email || body.identifier || '');
+    const code = String(body.code || '').trim();
+
+    if (!user || !code || user.verificationCode !== code) {
+      return text(res, 400, 'Invalid verification code');
+    }
+    if (Date.now() > user.verificationExpiresAt) {
+      return text(res, 400, 'Verification code expired');
+    }
+
+    db.prepare(
+      `UPDATE users
+       SET emailVerified = 1, verificationCode = '', verificationExpiresAt = 0
+       WHERE id = ?`
+    ).run(user.id);
+
+    return json(res, 200, sessionPayload(getUser(user.id)));
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/resend-verification') {
+    const body = await readBody(req);
+    const user = getUserByIdentifier(body.email || body.identifier || '');
+    if (!user) return text(res, 404, 'User not found');
+    if (user.emailVerified) return text(res, 400, 'Email is already verified');
+
+    return json(res, 200, {
+      email: user.email,
+      verificationCode: issueEmailVerification(user),
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/verify-2fa') {
+    const body = await readBody(req);
+    const user = getUser(body.userId);
+    const code = String(body.code || '').trim();
+
+    if (!user || !code || user.twoFactorCode !== code) {
+      return text(res, 400, 'Invalid login code');
+    }
+    if (Date.now() > user.twoFactorExpiresAt) {
+      return text(res, 400, 'Login code expired');
+    }
+
+    db.prepare(
+      `UPDATE users
+       SET twoFactorCode = '', twoFactorExpiresAt = 0
+       WHERE id = ?`
+    ).run(user.id);
+
+    return json(res, 200, sessionPayload(getUser(user.id)));
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/local') {
+    return text(res, 400, 'Email and password sign in is required');
   }
 
   if (req.method === 'GET' && parts[1] === 'auth' && parts[2] === 'local') {
@@ -577,6 +1026,35 @@ const handleApi = async (req, res, url) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/users') {
+    return json(res, 200, getUsers());
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/users') {
+    requireAdmin(url.searchParams.get('adminId'));
+    return json(res, 200, getUsers());
+  }
+
+  if (
+    req.method === 'PUT' &&
+    parts[1] === 'admin' &&
+    parts[2] === 'users' &&
+    parts[4] === 'role'
+  ) {
+    const body = await readBody(req);
+    requireAdmin(body.adminId);
+    const targetUser = getUser(parts[3]);
+    if (!targetUser) return text(res, 404, 'User not found');
+    const role = body.role === 'admin' ? 'admin' : 'user';
+
+    if (role === 'admin') {
+      db.prepare('UPDATE users SET admin = 0').run();
+      db.prepare('UPDATE users SET admin = 1 WHERE id = ?').run(parts[3]);
+    } else if (targetUser.admin) {
+      return text(res, 400, 'There must be exactly one admin');
+    } else {
+      db.prepare('UPDATE users SET admin = 0 WHERE id = ?').run(parts[3]);
+    }
+
     return json(res, 200, getUsers());
   }
 
@@ -608,14 +1086,28 @@ const handleApi = async (req, res, url) => {
         .prepare('SELECT id FROM users WHERE userName = ? AND id != ?')
         .get(userName, userId);
       if (existing) return text(res, 409, 'Username is already taken');
+      const nextPasswordHash =
+        body.password && String(body.password).length >= 6
+          ? hashPassword(String(body.password))
+          : current.passwordHash;
+      if (body.password && String(body.password).length < 6) {
+        return text(res, 400, 'Password must be at least 6 characters');
+      }
       db.prepare(
         `UPDATE users
-         SET userName = ?, displayName = ?, photoURL = ?
+         SET userName = ?, displayName = ?, photoURL = ?,
+             twoFactorEnabled = ?, passwordHash = ?
          WHERE id = ?`
       ).run(
         userName,
         body.displayName ?? current.displayName,
         body.photoURL ?? current.photoURL,
+        body.twoFactorEnabled === undefined
+          ? current.twoFactorEnabled
+          : body.twoFactorEnabled
+            ? 1
+            : 0,
+        nextPasswordHash,
         userId
       );
       return json(res, 200, userToData(getUser(userId)));
@@ -642,10 +1134,15 @@ const handleApi = async (req, res, url) => {
         const match = rowToMatch(getMatchRow(matchId));
         if (!match) return text(res, 404, 'Match not found');
         const now = Date.now();
-        const cutoff = match.timestamp * 1000 - 10 * 60 * 1000;
+        const cutoff =
+          match.timestamp * 1000 -
+          getScoring().predictionDeadlineMinutes * 60 * 1000;
         if (now >= cutoff) return text(res, 403, 'Predictions are closed');
         const homePrediction = Math.max(0, Math.floor(Number(body.homePrediction)));
         const awayPrediction = Math.max(0, Math.floor(Number(body.awayPrediction)));
+        if (!Number.isFinite(homePrediction) || !Number.isFinite(awayPrediction)) {
+          return text(res, 400, 'Predictions must be valid numbers');
+        }
         const points = calculatePoints(
           match.homeScore,
           match.awayScore,
@@ -658,7 +1155,13 @@ const handleApi = async (req, res, url) => {
            VALUES (?, ?, ?, ?, ?, ?)`
         ).run(userId, matchId, homePrediction, awayPrediction, points, now);
         rebuildUserScore(userId);
-        return json(res, 204);
+        const message = createNotification(
+          userId,
+          'prediction-saved',
+          'Prediction saved',
+          'Predicción guardada. Vas bien: cada marcador pensado cuenta.'
+        );
+        return json(res, 200, { message });
       }
     }
 
@@ -798,7 +1301,9 @@ const handleApi = async (req, res, url) => {
   if (url.pathname === '/api/settings/scoring') {
     if (req.method === 'GET') return json(res, 200, getScoring());
     if (req.method === 'PUT') {
-      setScoring(await readBody(req));
+      const body = await readBody(req);
+      requireAdmin(body.updatedBy);
+      setScoring(body);
       return json(res, 204);
     }
   }
@@ -864,6 +1369,8 @@ const server = http.createServer((req, res) => {
 
   serveStatic(req, res, url);
 });
+
+ensureDefaultAdmin();
 
 initializeMatchesIfMissing().catch((error) => {
   console.error('Initial match sync failed:', error);

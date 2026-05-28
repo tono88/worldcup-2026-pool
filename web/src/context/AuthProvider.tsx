@@ -1,8 +1,12 @@
 import React from 'react';
 import {
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
+  signInWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
+  updateProfile,
 } from 'firebase/auth';
 import { isLocalBackend } from '../config';
 import { auth, googleProvider } from '../firebase';
@@ -13,7 +17,7 @@ import {
   type UserData,
 } from '../services';
 import { localApi, type LocalUser } from '../services/localApi';
-import { AuthContext, type AppUser } from './AuthContext';
+import { AuthContext, type AppUser, type AuthFlowResult } from './AuthContext';
 
 const JOIN_INTENT_KEY = 'pendingJoinLeague';
 const PENDING_LEAGUE_KEY = 'pendingSelectedLeague';
@@ -135,16 +139,106 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [processJoinIntent, setLocalSession]);
 
   const signIn = React.useCallback(
-    async (displayName?: string) => {
+    async () => {
       if (isLocalBackend) {
-        const name = displayName?.trim() || window.prompt('Display name') || '';
-        if (!name.trim()) return;
-        const session = await localApi.signIn(name.trim());
-        await setLocalSession(session);
+        window.location.href = '/signin';
         return;
       }
 
       await signInWithPopup(auth, googleProvider);
+    },
+    []
+  );
+
+  const finishLocalAuth = React.useCallback(
+    async (result: Awaited<ReturnType<typeof localApi.login>>) => {
+      if (result.status === 'authenticated') {
+        await setLocalSession({
+          user: result.user,
+          userData: result.userData,
+        });
+        return { status: 'authenticated' } satisfies AuthFlowResult;
+      }
+
+      return result satisfies AuthFlowResult;
+    },
+    [setLocalSession]
+  );
+
+  const loginWithPassword = React.useCallback(
+    async (
+      identifier: string,
+      password: string
+    ): Promise<AuthFlowResult> => {
+      if (isLocalBackend) {
+        return finishLocalAuth(await localApi.login(identifier, password));
+      }
+
+      const credential = await signInWithEmailAndPassword(
+        auth,
+        identifier,
+        password
+      );
+      if (!credential.user.emailVerified) {
+        await sendEmailVerification(credential.user);
+        await firebaseSignOut(auth);
+        return {
+          status: 'verificationRequired',
+          email: credential.user.email || identifier,
+        };
+      }
+      return { status: 'authenticated' };
+    },
+    [finishLocalAuth]
+  );
+
+  const registerWithPassword = React.useCallback(
+    async (data: {
+      email: string;
+      password: string;
+      displayName: string;
+      userName: string;
+    }): Promise<AuthFlowResult> => {
+      if (isLocalBackend) {
+        return finishLocalAuth(await localApi.register(data));
+      }
+
+      const credential = await createUserWithEmailAndPassword(
+        auth,
+        data.email,
+        data.password
+      );
+      await updateProfile(credential.user, { displayName: data.displayName });
+      await sendEmailVerification(credential.user);
+      await firebaseSignOut(auth);
+      return { status: 'verificationRequired', email: data.email };
+    },
+    [finishLocalAuth]
+  );
+
+  const verifyEmail = React.useCallback(
+    async (email: string, code: string) => {
+      if (!isLocalBackend) {
+        throw new Error('Use the verification link sent by Firebase');
+      }
+      await setLocalSession(await localApi.verifyEmail(email, code));
+    },
+    [setLocalSession]
+  );
+
+  const resendVerification = React.useCallback(async (email: string) => {
+    if (!isLocalBackend) {
+      throw new Error('Try logging in again to resend the verification email');
+    }
+    return localApi.resendVerification(email);
+  }, []);
+
+  const verifyTwoFactor = React.useCallback(
+    async (userId: string, code: string) => {
+      if (!isLocalBackend) {
+        throw new Error('Two-factor verification is only available locally');
+      }
+      await setLocalSession(await localApi.verifyTwoFactor(userId, code));
     },
     [setLocalSession]
   );
@@ -165,6 +259,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     userData,
     loading,
     signIn,
+    loginWithPassword,
+    registerWithPassword,
+    verifyEmail,
+    resendVerification,
+    verifyTwoFactor,
     signOut,
     setUserData,
   };

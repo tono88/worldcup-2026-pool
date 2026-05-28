@@ -12,6 +12,7 @@ import {
   type UserPredictions,
   subscribeToPredictions,
   getUserByUsername,
+  subscribeToScoringSettings,
 } from '../services';
 
 type ViewMode = 'day' | 'group';
@@ -24,6 +25,8 @@ export const UserProfile = () => {
   const [predictions, setPredictions] = React.useState<UserPredictions>({});
   const [profileUserId, setProfileUserId] = React.useState<string | null>(null);
   const [profileLoading, setProfileLoading] = React.useState(true);
+  const [predictionDeadlineMinutes, setPredictionDeadlineMinutes] =
+    React.useState(10);
 
   // Determine if viewing own profile
   const isOwnProfile = userData?.userName === userName;
@@ -59,6 +62,13 @@ export const UserProfile = () => {
     return () => unsubscribe();
   }, [profileUserId]);
 
+  React.useEffect(() => {
+    const unsubscribe = subscribeToScoringSettings((settings) => {
+      setPredictionDeadlineMinutes(settings.predictionDeadlineMinutes);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const loading = profileLoading || matchesLoading;
 
   return (
@@ -88,6 +98,7 @@ export const UserProfile = () => {
                   isOwnProfile={isOwnProfile}
                   userId={profileUserId ?? undefined}
                   predictions={predictions}
+                  predictionDeadlineMinutes={predictionDeadlineMinutes}
                 />
               ) : (
                 <MatchesByGroup
@@ -95,6 +106,7 @@ export const UserProfile = () => {
                   isOwnProfile={isOwnProfile}
                   userId={profileUserId ?? undefined}
                   predictions={predictions}
+                  predictionDeadlineMinutes={predictionDeadlineMinutes}
                 />
               ))}
           </>

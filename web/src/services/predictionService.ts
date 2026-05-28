@@ -63,15 +63,15 @@ export const savePrediction = async (
   gameId: number,
   homePrediction: number,
   awayPrediction: number
-): Promise<void> => {
+): Promise<string | undefined> => {
   if (isLocalBackend) {
-    await localApi.savePrediction(
+    const result = await localApi.savePrediction(
       userId,
       gameId,
       homePrediction,
       awayPrediction
     );
-    return;
+    return result.message;
   }
 
   const predictionRef = ref(db, `predictions/${userId}/${gameId}`);
@@ -84,6 +84,7 @@ export const savePrediction = async (
   };
 
   await set(predictionRef, prediction);
+  return undefined;
 };
 
 /**

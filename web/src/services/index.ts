@@ -6,6 +6,7 @@ export {
   DEFAULT_TOURNAMENT_START_AT,
   getScoringSettings,
   getTournamentStartAt,
+  isFormulaRuleType,
   isScoringLocked,
   normalizeScoringSettings,
   saveScoringSettings,
@@ -14,17 +15,21 @@ export {
 export type {
   BonusRuleType,
   BonusScoringRule,
+  ScoringFormulaRule,
+  ScoringFormulaRuleType,
   ScoringSettings,
 } from './scoringService';
 
 export {
   checkUsernameAvailable,
   deleteUserAccount,
+  getAdminUsers,
   getUserByUsername,
   handleUserLogin,
   isReservedUsername,
   sanitizeUsername,
   subscribeToLeaderboard,
+  updateUserRole,
   updateUserProfile,
   uploadProfilePicture,
 } from './userService';

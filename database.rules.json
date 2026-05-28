@@ -35,10 +35,10 @@
         // Users can delete their own predictions (for account deletion), admins can write/delete all
         ".write": "auth != null && ((auth.uid === $userId && !newData.exists()) || root.child('users').child(auth.uid).child('admin').val() === true)",
         "$gameId": {
-          // Users can write their own predictions at least 10 mins before kickoff
+          // Users can write their own predictions before the configured deadline
           // Admins can write any predictions (for mock data)
           // Match timestamp is in seconds, now is in milliseconds
-          ".write": "auth != null && ((auth.uid === $userId && now < root.child('matches').child($gameId).child('timestamp').val() * 1000 - 600000) || root.child('users').child(auth.uid).child('admin').val() === true)",
+          ".write": "auth != null && ((auth.uid === $userId && now < root.child('matches').child($gameId).child('timestamp').val() * 1000 - root.child('settings').child('scoring').child('predictionDeadlineMinutes').val() * 60000) || root.child('users').child(auth.uid).child('admin').val() === true)",
           // Validate prediction structure
           ".validate": "newData.hasChildren(['homePrediction', 'awayPrediction', 'points', 'updatedAt'])",
           "homePrediction": {
@@ -106,7 +106,7 @@
       ".read": true,
       "scoring": {
         ".write": "auth != null && root.child('users').child(auth.uid).child('admin').val() === true && ((!data.exists() && now < newData.child('tournamentStartAt').val()) || (data.exists() && now < data.child('tournamentStartAt').val()))",
-        ".validate": "newData.hasChildren(['exactScorePoints', 'correctResultPoints', 'scoreDifferencePenalty', 'minimumCorrectResultPoints', 'wrongResultPoints', 'tournamentStartAt'])",
+        ".validate": "newData.hasChildren(['exactScorePoints', 'correctResultPoints', 'scoreDifferencePenalty', 'minimumCorrectResultPoints', 'wrongResultPoints', 'formulaRules', 'predictionDeadlineMinutes', 'tournamentStartAt'])",
         "exactScorePoints": {
           ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99"
         },
@@ -141,6 +141,29 @@
               ".validate": false
             }
           }
+        },
+        "formulaRules": {
+          "$ruleId": {
+            ".validate": "newData.hasChildren(['type', 'label', 'points', 'enabled'])",
+            "type": {
+              ".validate": "newData.isString() && (newData.val() === 'correctWinner' || newData.val() === 'correctGoalDifference' || newData.val() === 'exactScore' || newData.val() === 'correctDraw')"
+            },
+            "label": {
+              ".validate": "newData.isString()"
+            },
+            "points": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99"
+            },
+            "enabled": {
+              ".validate": "newData.isBoolean()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "predictionDeadlineMinutes": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10080"
         },
         "tournamentStartAt": {
           ".validate": "newData.isNumber() && newData.val() > 0 && (!data.exists() || newData.val() === data.val())"

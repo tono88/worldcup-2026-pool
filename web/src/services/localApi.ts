@@ -12,6 +12,25 @@ export interface LocalUser {
   photoURL: string;
 }
 
+export type LocalAuthResult =
+  | {
+      status: 'authenticated';
+      user: LocalUser;
+      userData: UserData;
+    }
+  | {
+      status: 'verificationRequired';
+      userId: string;
+      email: string;
+      verificationCode?: string;
+    }
+  | {
+      status: 'twoFactorRequired';
+      userId: string;
+      email: string;
+      verificationCode?: string;
+    };
+
 const request = async <T>(
   path: string,
   options?: RequestInit
@@ -78,6 +97,41 @@ export const localApi = {
       body: JSON.stringify({ displayName }),
     }),
 
+  register: (data: {
+    email: string;
+    password: string;
+    displayName: string;
+    userName: string;
+  }) =>
+    request<LocalAuthResult>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  login: (identifier: string, password: string) =>
+    request<LocalAuthResult>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, password }),
+    }),
+
+  verifyEmail: (email: string, code: string) =>
+    request<{ user: LocalUser; userData: UserData }>('/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ email, code }),
+    }),
+
+  resendVerification: (email: string) =>
+    request<{ verificationCode?: string }>('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  verifyTwoFactor: (userId: string, code: string) =>
+    request<{ user: LocalUser; userData: UserData }>('/auth/verify-2fa', {
+      method: 'POST',
+      body: JSON.stringify({ userId, code }),
+    }),
+
   getSession: (userId: string) =>
     request<{ user: LocalUser; userData: UserData }>(
       `/auth/local/${encodeURIComponent(userId)}`
@@ -101,12 +155,22 @@ export const localApi = {
     homePrediction: number,
     awayPrediction: number
   ) =>
-    request<void>(`/users/${encodeURIComponent(userId)}/predictions/${gameId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ homePrediction, awayPrediction }),
-    }),
+    request<{ message?: string }>(
+      `/users/${encodeURIComponent(userId)}/predictions/${gameId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ homePrediction, awayPrediction }),
+      }
+    ),
 
   getLeaderboard: () => request<UserWithId[]>('/users'),
+  getAdminUsers: (adminId: string) =>
+    request<UserWithId[]>(`/admin/users?adminId=${encodeURIComponent(adminId)}`),
+  updateUserRole: (adminId: string, userId: string, role: 'admin' | 'user') =>
+    request<UserWithId[]>(`/admin/users/${encodeURIComponent(userId)}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ adminId, role }),
+    }),
   checkUsername: (userName: string, currentUid?: string) => {
     const params = new URLSearchParams({ userName });
     if (currentUid) params.set('currentUid', currentUid);
@@ -114,7 +178,13 @@ export const localApi = {
   },
   updateUserProfile: (
     userId: string,
-    data: { userName?: string; displayName?: string; photoURL?: string }
+    data: {
+      userName?: string;
+      displayName?: string;
+      photoURL?: string;
+      twoFactorEnabled?: boolean;
+      password?: string;
+    }
   ) =>
     request<UserData>(`/users/${encodeURIComponent(userId)}`, {
       method: 'PUT',

@@ -1,6 +1,8 @@
 import React from 'react';
 import { type Match, type Prediction, savePrediction } from '../../services';
+import { useToast } from '../../hooks';
 import { Card } from '../ui/Card';
+import { Button } from '../ui/Button';
 
 // Import all flags dynamically
 const flagModules: Record<string, string> = import.meta.glob(
@@ -20,6 +22,7 @@ type MatchCardProps = {
   isOwnProfile?: boolean;
   userId?: string;
   prediction?: Prediction;
+  predictionDeadlineMinutes?: number;
 };
 
 export const MatchCard = ({
@@ -27,7 +30,9 @@ export const MatchCard = ({
   isOwnProfile = false,
   userId,
   prediction,
+  predictionDeadlineMinutes = 10,
 }: MatchCardProps) => {
+  const { showToast } = useToast();
   const matchDate = new Date(match.date);
   const timeString = matchDate.toLocaleTimeString([], {
     hour: '2-digit',
@@ -37,7 +42,8 @@ export const MatchCard = ({
   const isFinished =
     match.status === 'finished' ||
     ((!match.status || match.status === 'unknown') && hasScore);
-  const cutoffTime = match.timestamp * 1000 - 10 * 60 * 1000; // 10 mins before kickoff
+  const cutoffTime =
+    match.timestamp * 1000 - predictionDeadlineMinutes * 60 * 1000;
   const predictionsClosed = Date.now() > cutoffTime;
 
   const kickoffTime = match.timestamp * 1000;
@@ -54,14 +60,40 @@ export const MatchCard = ({
     prediction?.awayPrediction?.toString() ?? ''
   );
   const [saving, setSaving] = React.useState(false);
+  const [savedAt, setSavedAt] = React.useState<number | null>(null);
+  const [lastSavedPrediction, setLastSavedPrediction] = React.useState<{
+    home: string;
+    away: string;
+  } | null>(
+    prediction
+      ? {
+          home: prediction.homePrediction?.toString() ?? '',
+          away: prediction.awayPrediction?.toString() ?? '',
+        }
+      : null
+  );
 
   // Update local state when prediction prop changes
   React.useEffect(() => {
     if (prediction) {
       setHomePrediction(prediction.homePrediction?.toString() ?? '');
       setAwayPrediction(prediction.awayPrediction?.toString() ?? '');
+      setLastSavedPrediction({
+        home: prediction.homePrediction?.toString() ?? '',
+        away: prediction.awayPrediction?.toString() ?? '',
+      });
     }
   }, [prediction]);
+
+  const hasCompletePrediction = homePrediction !== '' && awayPrediction !== '';
+  const savedHomePrediction =
+    lastSavedPrediction?.home ?? prediction?.homePrediction?.toString() ?? '';
+  const savedAwayPrediction =
+    lastSavedPrediction?.away ?? prediction?.awayPrediction?.toString() ?? '';
+  const isDirty =
+    hasCompletePrediction &&
+    (homePrediction !== savedHomePrediction ||
+      awayPrediction !== savedAwayPrediction);
 
   const handleSavePrediction = async () => {
     if (!userId || !canPredict) return;
@@ -73,17 +105,18 @@ export const MatchCard = ({
 
     setSaving(true);
     try {
-      await savePrediction(userId, match.game, home, away);
+      const message = await savePrediction(userId, match.game, home, away);
+      setSavedAt(Date.now());
+      setLastSavedPrediction({ home: homePrediction, away: awayPrediction });
+      showToast(message || 'Prediction saved');
     } catch (error) {
       console.error('Error saving prediction:', error);
+      showToast(
+        error instanceof Error ? error.message : 'Failed to save prediction',
+        'error'
+      );
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleBlur = () => {
-    if (homePrediction !== '' && awayPrediction !== '') {
-      void handleSavePrediction();
     }
   };
 
@@ -136,7 +169,6 @@ export const MatchCard = ({
                   setHomePrediction(val);
                 }}
                 onFocus={(e) => e.target.select()}
-                onBlur={handleBlur}
                 className={inputClass}
                 disabled={saving}
                 placeholder="-"
@@ -179,7 +211,6 @@ export const MatchCard = ({
                   setAwayPrediction(val);
                 }}
                 onFocus={(e) => e.target.select()}
-                onBlur={handleBlur}
                 className={inputClass}
                 disabled={saving}
                 placeholder="-"
@@ -229,6 +260,25 @@ export const MatchCard = ({
           </div>
         )}
       </div>
+
+      {canPredict && (
+        <div className="mb-3 flex items-center justify-end gap-3">
+          {savedAt && !isDirty && (
+            <span className="text-xs text-emerald-300">Saved</span>
+          )}
+          {isDirty && (
+            <span className="text-xs text-yellow-300">Unsaved changes</span>
+          )}
+          <Button
+            type="button"
+            onClick={() => void handleSavePrediction()}
+            disabled={!hasCompletePrediction || saving || !isDirty}
+            className="text-xs py-1.5 px-3"
+          >
+            {saving ? 'Saving...' : 'Save Prediction'}
+          </Button>
+        </div>
+      )}
 
       {/* Footer: Group, Stadium, Date/Time */}
       <div className="flex items-center gap-2 text-xs text-white/50">

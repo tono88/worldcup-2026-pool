@@ -11,9 +11,24 @@ export interface ScoringSettings {
   minimumCorrectResultPoints: number;
   wrongResultPoints: number;
   bonusRules: Record<string, BonusScoringRule>;
+  formulaRules: Record<string, ScoringFormulaRule>;
+  predictionDeadlineMinutes: number;
   tournamentStartAt: number;
   updatedAt?: number;
   updatedBy?: string;
+}
+
+export type ScoringFormulaRuleType =
+  | 'correctWinner'
+  | 'correctGoalDifference'
+  | 'exactScore'
+  | 'correctDraw';
+
+export interface ScoringFormulaRule {
+  type: ScoringFormulaRuleType;
+  label: string;
+  points: number;
+  enabled: boolean;
 }
 
 export type BonusRuleType =
@@ -39,6 +54,33 @@ export const DEFAULT_SCORING_SETTINGS: ScoringSettings = {
   minimumCorrectResultPoints: 0,
   wrongResultPoints: 0,
   bonusRules: {},
+  formulaRules: {
+    'correct-winner': {
+      type: 'correctWinner',
+      label: 'Adivinar equipo ganador',
+      points: 1,
+      enabled: true,
+    },
+    'goal-difference': {
+      type: 'correctGoalDifference',
+      label: 'Predecir distancia de goles',
+      points: 2,
+      enabled: true,
+    },
+    'exact-score': {
+      type: 'exactScore',
+      label: 'Resultado exacto',
+      points: 3,
+      enabled: true,
+    },
+    'correct-draw': {
+      type: 'correctDraw',
+      label: 'Empate correcto',
+      points: 3,
+      enabled: true,
+    },
+  },
+  predictionDeadlineMinutes: 10,
   tournamentStartAt: DEFAULT_TOURNAMENT_START_AT,
 };
 
@@ -46,6 +88,13 @@ const BONUS_RULE_LABELS: Record<BonusRuleType, string> = {
   correctHomeScore: 'Correct home score',
   correctAwayScore: 'Correct away score',
   correctGoalDifference: 'Correct goal difference',
+};
+
+const FORMULA_RULE_LABELS: Record<ScoringFormulaRuleType, string> = {
+  correctWinner: 'Adivinar equipo ganador',
+  correctGoalDifference: 'Predecir distancia de goles',
+  exactScore: 'Resultado exacto',
+  correctDraw: 'Empate correcto',
 };
 
 const toFiniteNumber = (
@@ -63,6 +112,14 @@ const isBonusRuleType = (value: unknown): value is BonusRuleType =>
   value === 'correctHomeScore' ||
   value === 'correctAwayScore' ||
   value === 'correctGoalDifference';
+
+export const isFormulaRuleType = (
+  value: unknown
+): value is ScoringFormulaRuleType =>
+  value === 'correctWinner' ||
+  value === 'correctGoalDifference' ||
+  value === 'exactScore' ||
+  value === 'correctDraw';
 
 const normalizeBonusRules = (
   rules: unknown
@@ -94,6 +151,40 @@ const normalizeBonusRules = (
   }
 
   return normalizedRules;
+};
+
+const normalizeFormulaRules = (
+  rules: unknown
+): Record<string, ScoringFormulaRule> => {
+  if (!rules || typeof rules !== 'object') {
+    return DEFAULT_SCORING_SETTINGS.formulaRules;
+  }
+
+  const normalizedRules: Record<string, ScoringFormulaRule> = {};
+
+  for (const [ruleId, rule] of Object.entries(
+    rules as Record<string, Partial<ScoringFormulaRule>>
+  )) {
+    if (!ruleId || !isFormulaRuleType(rule.type)) {
+      continue;
+    }
+
+    const label =
+      typeof rule.label === 'string' && rule.label.trim()
+        ? rule.label.trim().slice(0, 80)
+        : FORMULA_RULE_LABELS[rule.type];
+
+    normalizedRules[ruleId] = {
+      type: rule.type,
+      label,
+      points: toFiniteNumber(rule.points, 0),
+      enabled: rule.enabled !== false,
+    };
+  }
+
+  return Object.keys(normalizedRules).length > 0
+    ? normalizedRules
+    : DEFAULT_SCORING_SETTINGS.formulaRules;
 };
 
 export const getTournamentStartAt = (
@@ -139,6 +230,11 @@ export const normalizeScoringSettings = (
     DEFAULT_SCORING_SETTINGS.wrongResultPoints
   ),
   bonusRules: normalizeBonusRules(settings?.bonusRules),
+  formulaRules: normalizeFormulaRules(settings?.formulaRules),
+  predictionDeadlineMinutes: toFiniteNumber(
+    settings?.predictionDeadlineMinutes,
+    DEFAULT_SCORING_SETTINGS.predictionDeadlineMinutes
+  ),
   tournamentStartAt: toFiniteNumber(
     settings?.tournamentStartAt,
     fallbackTournamentStartAt
@@ -213,6 +309,8 @@ export const saveScoringSettings = async (
     minimumCorrectResultPoints: settings.minimumCorrectResultPoints,
     wrongResultPoints: settings.wrongResultPoints,
     bonusRules: settings.bonusRules ?? {},
+    formulaRules: settings.formulaRules,
+    predictionDeadlineMinutes: settings.predictionDeadlineMinutes,
     tournamentStartAt: settings.tournamentStartAt,
     updatedAt: Date.now(),
     updatedBy: userId,

@@ -5,9 +5,24 @@ export interface ScoringSettings {
   minimumCorrectResultPoints: number;
   wrongResultPoints: number;
   bonusRules: Record<string, BonusScoringRule>;
+  formulaRules: Record<string, ScoringFormulaRule>;
+  predictionDeadlineMinutes: number;
   tournamentStartAt: number;
   updatedAt?: number;
   updatedBy?: string;
+}
+
+export type ScoringFormulaRuleType =
+  | 'correctWinner'
+  | 'correctGoalDifference'
+  | 'exactScore'
+  | 'correctDraw';
+
+export interface ScoringFormulaRule {
+  type: ScoringFormulaRuleType;
+  label: string;
+  points: number;
+  enabled: boolean;
 }
 
 export type BonusRuleType =
@@ -33,6 +48,33 @@ export const DEFAULT_SCORING_SETTINGS: ScoringSettings = {
   minimumCorrectResultPoints: 0,
   wrongResultPoints: 0,
   bonusRules: {},
+  formulaRules: {
+    'correct-winner': {
+      type: 'correctWinner',
+      label: 'Adivinar equipo ganador',
+      points: 1,
+      enabled: true,
+    },
+    'goal-difference': {
+      type: 'correctGoalDifference',
+      label: 'Predecir distancia de goles',
+      points: 2,
+      enabled: true,
+    },
+    'exact-score': {
+      type: 'exactScore',
+      label: 'Resultado exacto',
+      points: 3,
+      enabled: true,
+    },
+    'correct-draw': {
+      type: 'correctDraw',
+      label: 'Empate correcto',
+      points: 3,
+      enabled: true,
+    },
+  },
+  predictionDeadlineMinutes: 10,
   tournamentStartAt: DEFAULT_TOURNAMENT_START_AT,
 };
 
@@ -42,6 +84,13 @@ const BONUS_RULE_LABELS: Record<BonusRuleType, string> = {
   correctHomeScore: 'Correct home score',
   correctAwayScore: 'Correct away score',
   correctGoalDifference: 'Correct goal difference',
+};
+
+const FORMULA_RULE_LABELS: Record<ScoringFormulaRuleType, string> = {
+  correctWinner: 'Adivinar equipo ganador',
+  correctGoalDifference: 'Predecir distancia de goles',
+  exactScore: 'Resultado exacto',
+  correctDraw: 'Empate correcto',
 };
 
 export const getWinner = (home: number, away: number): Winner => {
@@ -65,6 +114,12 @@ const isBonusRuleType = (value: unknown): value is BonusRuleType =>
   value === 'correctHomeScore' ||
   value === 'correctAwayScore' ||
   value === 'correctGoalDifference';
+
+const isFormulaRuleType = (value: unknown): value is ScoringFormulaRuleType =>
+  value === 'correctWinner' ||
+  value === 'correctGoalDifference' ||
+  value === 'exactScore' ||
+  value === 'correctDraw';
 
 const normalizeBonusRules = (
   rules: unknown
@@ -98,6 +153,40 @@ const normalizeBonusRules = (
   return normalizedRules;
 };
 
+const normalizeFormulaRules = (
+  rules: unknown
+): Record<string, ScoringFormulaRule> => {
+  if (!rules || typeof rules !== 'object') {
+    return DEFAULT_SCORING_SETTINGS.formulaRules;
+  }
+
+  const normalizedRules: Record<string, ScoringFormulaRule> = {};
+
+  for (const [ruleId, rule] of Object.entries(
+    rules as Record<string, Partial<ScoringFormulaRule>>
+  )) {
+    if (!ruleId || !isFormulaRuleType(rule.type)) {
+      continue;
+    }
+
+    const label =
+      typeof rule.label === 'string' && rule.label.trim()
+        ? rule.label.trim().slice(0, 80)
+        : FORMULA_RULE_LABELS[rule.type];
+
+    normalizedRules[ruleId] = {
+      type: rule.type,
+      label,
+      points: toFiniteNumber(rule.points, 0),
+      enabled: rule.enabled !== false,
+    };
+  }
+
+  return Object.keys(normalizedRules).length > 0
+    ? normalizedRules
+    : DEFAULT_SCORING_SETTINGS.formulaRules;
+};
+
 export const normalizeScoringSettings = (
   settings: Partial<ScoringSettings> | null | undefined
 ): ScoringSettings => ({
@@ -122,6 +211,11 @@ export const normalizeScoringSettings = (
     DEFAULT_SCORING_SETTINGS.wrongResultPoints
   ),
   bonusRules: normalizeBonusRules(settings?.bonusRules),
+  formulaRules: normalizeFormulaRules(settings?.formulaRules),
+  predictionDeadlineMinutes: toFiniteNumber(
+    settings?.predictionDeadlineMinutes,
+    DEFAULT_SCORING_SETTINGS.predictionDeadlineMinutes
+  ),
   tournamentStartAt: toFiniteNumber(
     settings?.tournamentStartAt,
     DEFAULT_SCORING_SETTINGS.tournamentStartAt
@@ -157,6 +251,38 @@ const getBonusRulePoints = (
   }
 };
 
+const formulaRuleMatches = (
+  rule: ScoringFormulaRule,
+  homeScore: number,
+  awayScore: number,
+  homePrediction: number,
+  awayPrediction: number
+): boolean => {
+  if (!rule.enabled) {
+    return false;
+  }
+
+  switch (rule.type) {
+    case 'correctWinner':
+      return (
+        getWinner(homeScore, awayScore) !== 'tied' &&
+        getWinner(homeScore, awayScore) ===
+          getWinner(homePrediction, awayPrediction)
+      );
+    case 'correctGoalDifference':
+      return homeScore - awayScore === homePrediction - awayPrediction;
+    case 'exactScore':
+      return homeScore === homePrediction && awayScore === awayPrediction;
+    case 'correctDraw':
+      return (
+        getWinner(homeScore, awayScore) === 'tied' &&
+        getWinner(homePrediction, awayPrediction) === 'tied'
+      );
+    default:
+      return false;
+  }
+};
+
 export const isScoringLocked = (
   settings: Partial<ScoringSettings> | null | undefined,
   now = Date.now()
@@ -181,6 +307,26 @@ export const calculatePoints = (
   }
 
   let points = scoringSettings.wrongResultPoints;
+
+  if (scoringSettings.formulaRules) {
+    return Object.values(scoringSettings.formulaRules).reduce(
+      (formulaPoints, rule) => {
+        if (
+          !formulaRuleMatches(
+            rule,
+            homeScore,
+            awayScore,
+            homePrediction,
+            awayPrediction
+          )
+        ) {
+          return formulaPoints;
+        }
+        return Math.max(formulaPoints, rule.points);
+      },
+      0
+    );
+  }
 
   if (homeScore === homePrediction && awayScore === awayPrediction) {
     points = scoringSettings.exactScorePoints;

@@ -198,6 +198,18 @@ By default the app is exposed on `http://localhost:8090`. In CasaOS, use
 `casaos-compose.yml` as a custom app compose file. No Firebase credentials are
 required for the local CasaOS install.
 
+The local install creates one initial administrator account:
+
+```text
+Username: admin
+Password: admin
+```
+
+New users register with email and password, then verify their email with a
+local verification code. In the self-hosted build, verification and two-factor
+codes are logged by the server and surfaced during the auth flow so the app can
+be used without SMTP setup.
+
 ## Scoring Rules
 
 Admins can open `/rules` before tournament kickoff and change:

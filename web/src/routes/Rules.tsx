@@ -3,25 +3,23 @@ import { AppLayout, Button, Card } from '../components';
 import { useAuth, useMatches, useToast } from '../hooks';
 import {
   getTournamentStartAt,
+  isFormulaRuleType,
   isScoringLocked,
   saveScoringSettings,
   subscribeToScoringSettings,
-  type BonusRuleType,
-  type BonusScoringRule,
+  type ScoringFormulaRule,
+  type ScoringFormulaRuleType,
   type ScoringSettings,
 } from '../services';
 
-type NumericScoringField =
-  | 'exactScorePoints'
-  | 'correctResultPoints'
-  | 'scoreDifferencePenalty'
-  | 'minimumCorrectResultPoints'
-  | 'wrongResultPoints';
-
-const bonusRuleOptions: Array<{ type: BonusRuleType; label: string }> = [
-  { type: 'correctHomeScore', label: 'Correct home score' },
-  { type: 'correctAwayScore', label: 'Correct away score' },
-  { type: 'correctGoalDifference', label: 'Correct goal difference' },
+const formulaRuleOptions: Array<{
+  type: ScoringFormulaRuleType;
+  label: string;
+}> = [
+  { type: 'correctWinner', label: 'Adivinar equipo ganador' },
+  { type: 'correctGoalDifference', label: 'Predecir distancia de goles' },
+  { type: 'exactScore', label: 'Resultado exacto' },
+  { type: 'correctDraw', label: 'Empate correcto' },
 ];
 
 const getWinner = (home: number, away: number): 'home' | 'away' | 'tied' => {
@@ -30,26 +28,33 @@ const getWinner = (home: number, away: number): 'home' | 'away' | 'tied' => {
   return 'tied';
 };
 
-const getBonusRulePoints = (
-  rule: BonusScoringRule,
+const ruleMatches = (
+  rule: ScoringFormulaRule,
   homeScore: number,
   awayScore: number,
   homePrediction: number,
   awayPrediction: number
-): number => {
-  if (!rule.enabled) return 0;
+): boolean => {
+  if (!rule.enabled) return false;
 
   switch (rule.type) {
-    case 'correctHomeScore':
-      return homeScore === homePrediction ? rule.points : 0;
-    case 'correctAwayScore':
-      return awayScore === awayPrediction ? rule.points : 0;
+    case 'correctWinner':
+      return (
+        getWinner(homeScore, awayScore) !== 'tied' &&
+        getWinner(homeScore, awayScore) ===
+          getWinner(homePrediction, awayPrediction)
+      );
     case 'correctGoalDifference':
-      return homeScore - awayScore === homePrediction - awayPrediction
-        ? rule.points
-        : 0;
+      return homeScore - awayScore === homePrediction - awayPrediction;
+    case 'exactScore':
+      return homeScore === homePrediction && awayScore === awayPrediction;
+    case 'correctDraw':
+      return (
+        getWinner(homeScore, awayScore) === 'tied' &&
+        getWinner(homePrediction, awayPrediction) === 'tied'
+      );
     default:
-      return 0;
+      return false;
   }
 };
 
@@ -59,37 +64,13 @@ const calculateExamplePoints = (
   awayScore: number,
   homePrediction: number,
   awayPrediction: number
-): number => {
-  let points = settings.wrongResultPoints;
-
-  if (homeScore === homePrediction && awayScore === awayPrediction) {
-    points = settings.exactScorePoints;
-  } else if (
-    getWinner(homeScore, awayScore) ===
-    getWinner(homePrediction, awayPrediction)
-  ) {
-    const difference =
-      Math.abs(homePrediction - homeScore) +
-      Math.abs(awayPrediction - awayScore);
-    points = Math.max(
-      settings.minimumCorrectResultPoints,
-      settings.correctResultPoints -
-        difference * settings.scoreDifferencePenalty
-    );
-  }
-
-  for (const rule of Object.values(settings.bonusRules)) {
-    points += getBonusRulePoints(
-      rule,
-      homeScore,
-      awayScore,
-      homePrediction,
-      awayPrediction
-    );
-  }
-
-  return points;
-};
+): number =>
+  Object.values(settings.formulaRules).reduce((points, rule) => {
+    if (!ruleMatches(rule, homeScore, awayScore, homePrediction, awayPrediction)) {
+      return points;
+    }
+    return Math.max(points, rule.points);
+  }, 0);
 
 const formatLockDate = (timestamp: number): string =>
   new Intl.DateTimeFormat([], {
@@ -109,27 +90,27 @@ export const Rules = () => {
   const [form, setForm] = React.useState<ScoringSettings | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [newBonusType, setNewBonusType] =
-    React.useState<BonusRuleType>('correctHomeScore');
-  const [newBonusPoints, setNewBonusPoints] = React.useState(1);
+  const [newRuleType, setNewRuleType] =
+    React.useState<ScoringFormulaRuleType>('correctWinner');
+  const [newRulePoints, setNewRulePoints] = React.useState(1);
 
   const isAdmin = userData?.admin === true;
   const locked = settings ? isScoringLocked(settings) : false;
-  const activeBonusRules = settings
-    ? Object.entries(settings.bonusRules).filter(([, rule]) => rule.enabled)
+  const activeRules = settings
+    ? Object.entries(settings.formulaRules).filter(([, rule]) => rule.enabled)
     : [];
-  const formBonusRules = form ? Object.entries(form.bonusRules) : [];
+  const formRules = form ? Object.entries(form.formulaRules) : [];
   const exactExample = settings
     ? calculateExamplePoints(settings, 2, 1, 2, 1)
     : 0;
-  const correctWinnerExample = settings
-    ? calculateExamplePoints(settings, 2, 1, 3, 0)
+  const winnerExample = settings
+    ? calculateExamplePoints(settings, 2, 1, 3, 1)
     : 0;
-  const correctDrawExample = settings
-    ? calculateExamplePoints(settings, 2, 2, 0, 0)
+  const differenceExample = settings
+    ? calculateExamplePoints(settings, 2, 1, 1, 0)
     : 0;
-  const wrongResultExample = settings
-    ? calculateExamplePoints(settings, 2, 1, 0, 2)
+  const drawExample = settings
+    ? calculateExamplePoints(settings, 1, 1, 0, 0)
     : 0;
 
   React.useEffect(() => {
@@ -141,64 +122,61 @@ export const Rules = () => {
     return () => unsubscribe();
   }, [fallbackTournamentStartAt]);
 
-  const handleNumberChange = (key: NumericScoringField, value: string) => {
-    const numericValue = Math.max(0, Math.floor(Number(value) || 0));
-    setForm((current) =>
-      current ? { ...current, [key]: numericValue } : current
-    );
-  };
-
-  const handleAddBonusRule = () => {
-    const option = bonusRuleOptions.find((item) => item.type === newBonusType);
-    if (!option) return;
-
-    const ruleId = `bonus-${Date.now()}`;
-    setForm((current) =>
-      current
-        ? {
-            ...current,
-            bonusRules: {
-              ...current.bonusRules,
-              [ruleId]: {
-                type: option.type,
-                label: option.label,
-                points: Math.max(0, Math.floor(newBonusPoints || 0)),
-                enabled: true,
-              },
-            },
-          }
-        : current
-    );
-  };
-
-  const handleBonusRuleChange = (
+  const updateRule = (
     ruleId: string,
-    updates: Partial<BonusScoringRule>
+    updates: Partial<ScoringFormulaRule>
   ) => {
     setForm((current) => {
-      if (!current || !current.bonusRules[ruleId]) return current;
+      if (!current || !current.formulaRules[ruleId]) return current;
+
+      const currentRule = current.formulaRules[ruleId];
+      const nextType = updates.type ?? currentRule.type;
+      if (!isFormulaRuleType(nextType)) return current;
 
       return {
         ...current,
-        bonusRules: {
-          ...current.bonusRules,
+        formulaRules: {
+          ...current.formulaRules,
           [ruleId]: {
-            ...current.bonusRules[ruleId],
+            ...currentRule,
             ...updates,
+            type: nextType,
           },
         },
       };
     });
   };
 
-  const handleRemoveBonusRule = (ruleId: string) => {
+  const removeRule = (ruleId: string) => {
     setForm((current) => {
       if (!current) return current;
-
-      const bonusRules = { ...current.bonusRules };
-      delete bonusRules[ruleId];
-      return { ...current, bonusRules };
+      const formulaRules = { ...current.formulaRules };
+      delete formulaRules[ruleId];
+      return { ...current, formulaRules };
     });
+  };
+
+  const addRule = () => {
+    const option = formulaRuleOptions.find((item) => item.type === newRuleType);
+    if (!option) return;
+
+    const ruleId = `rule-${Date.now()}`;
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            formulaRules: {
+              ...current.formulaRules,
+              [ruleId]: {
+                type: option.type,
+                label: option.label,
+                points: Math.max(0, Math.floor(newRulePoints || 0)),
+                enabled: true,
+              },
+            },
+          }
+        : current
+    );
   };
 
   const handleSave = async () => {
@@ -221,200 +199,69 @@ export const Rules = () => {
   };
 
   const inputClass =
-    'w-24 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-right font-semibold focus:outline-none focus:border-white/40 disabled:opacity-50';
+    'w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:border-white/40 disabled:opacity-50';
+  const numberInputClass = `${inputClass} text-right font-semibold`;
 
   return (
     <AppLayout>
-      <div className="pt-8 px-4 pb-8 max-w-2xl mx-auto">
+      <div className="pt-8 px-4 pb-8 max-w-3xl mx-auto">
         <h1 className="text-3xl font-bold text-white mb-8">Rules</h1>
 
-        <Card className="p-6 mb-6">
-          <h2 className="text-xl font-semibold text-white mb-4">
-            Prediction Deadline
-          </h2>
-          <p className="text-white/80">
-            Predictions must be submitted{' '}
-            <span className="text-white font-semibold">
-              at least 10 minutes before kickoff
-            </span>
-            . After that, predictions are locked and cannot be changed.
-          </p>
-        </Card>
-
         {settings && (
-          <Card className="p-6 mb-6">
-            <div className="flex flex-col gap-2 mb-6">
-              <h2 className="text-xl font-semibold text-white">
-                How Points Are Calculated
+          <>
+            <Card className="p-6 mb-6">
+              <div className="flex flex-col gap-2 mb-6">
+                <h2 className="text-xl font-semibold text-white">
+                  Points Formula
+                </h2>
+                <p className="text-sm text-white/60">
+                  The highest matching rule wins. Predictions close{' '}
+                  {settings.predictionDeadlineMinutes} minutes before kickoff.
+                </p>
+                <p className="text-xs text-white/40">
+                  Rule edits lock from {formatLockDate(settings.tournamentStartAt)}.
+                </p>
+              </div>
+
+              <div className="space-y-3 text-white/80">
+                {activeRules.map(([ruleId, rule]) => (
+                  <div
+                    key={ruleId}
+                    className="flex items-center justify-between gap-4 border-b border-white/10 pb-3"
+                  >
+                    <span>{rule.label}</span>
+                    <span className="font-bold text-white">{rule.points}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="p-6 mb-6">
+              <h2 className="text-xl font-semibold text-white mb-4">
+                Examples
               </h2>
-              <p className="text-sm text-white/50">
-                Locked from {formatLockDate(settings.tournamentStartAt)}
-              </p>
-            </div>
-
-            <div className="space-y-4 text-white/80">
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">1</span>
-                <div>
-                  <h3 className="font-semibold text-white">
-                    Exact Score - {settings.exactScorePoints} points
-                  </h3>
-                  <p className="text-sm">
-                    Predict the exact final score of both teams.
-                  </p>
+              <div className="grid gap-3 text-sm text-white/75 md:grid-cols-2">
+                <div className="rounded-lg border border-white/10 p-3">
+                  <div className="font-mono text-white">2-1 predicted 2-1</div>
+                  <div className="mt-1 text-emerald-300">{exactExample} pts</div>
                 </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">2</span>
-                <div>
-                  <h3 className="font-semibold text-white">
-                    Correct Result - up to {settings.correctResultPoints} points
-                  </h3>
-                  <p className="text-sm">
-                    Predict the correct winner or draw. Points lose{' '}
-                    {settings.scoreDifferencePenalty} per missed goal, down to{' '}
-                    {settings.minimumCorrectResultPoints}.
-                  </p>
+                <div className="rounded-lg border border-white/10 p-3">
+                  <div className="font-mono text-white">2-1 predicted 3-1</div>
+                  <div className="mt-1 text-emerald-300">{winnerExample} pts</div>
                 </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">0</span>
-                <div>
-                  <h3 className="font-semibold text-white">
-                    Wrong Result - {settings.wrongResultPoints} points
-                  </h3>
-                  <p className="text-sm">
-                    Predict the wrong winner or miss a draw.
-                  </p>
-                </div>
-              </div>
-
-              {activeBonusRules.length > 0 && (
-                <div className="border-t border-white/10 pt-4">
-                  <h3 className="font-semibold text-white mb-2">
-                    Bonus Rules
-                  </h3>
-                  <div className="space-y-2">
-                    {activeBonusRules.map(([ruleId, rule]) => (
-                      <div
-                        key={ruleId}
-                        className="flex items-center justify-between gap-4 text-sm"
-                      >
-                        <span>{rule.label}</span>
-                        <span className="font-semibold text-white">
-                          +{rule.points}
-                        </span>
-                      </div>
-                    ))}
+                <div className="rounded-lg border border-white/10 p-3">
+                  <div className="font-mono text-white">2-1 predicted 1-0</div>
+                  <div className="mt-1 text-emerald-300">
+                    {differenceExample} pts
                   </div>
                 </div>
-              )}
-            </div>
-
-            <h2 className="mt-8 text-xl font-semibold text-white mb-4">
-              Examples
-            </h2>
-
-            <div className="space-y-6">
-              <div className="border-b border-white/10 pb-4">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                  <span className="text-white/60 text-sm">Actual Result</span>
-                  <span className="text-white font-mono">
-                    Mexico 2 - 1 South Africa
-                  </span>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                  <span className="text-white/60 text-sm">Your Prediction</span>
-                  <span className="text-white font-mono">
-                    Mexico 2 - 1 South Africa
-                  </span>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-                  <span className="text-white/60 text-sm">Points Earned</span>
-                  <span className="text-green-400 font-bold">
-                    {exactExample} points
-                  </span>
+                <div className="rounded-lg border border-white/10 p-3">
+                  <div className="font-mono text-white">1-1 predicted 0-0</div>
+                  <div className="mt-1 text-emerald-300">{drawExample} pts</div>
                 </div>
               </div>
-
-              <div className="border-b border-white/10 pb-4">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                  <span className="text-white/60 text-sm">Actual Result</span>
-                  <span className="text-white font-mono">
-                    Brazil 2 - 1 Morocco
-                  </span>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                  <span className="text-white/60 text-sm">Your Prediction</span>
-                  <span className="text-white font-mono">
-                    Brazil 3 - 0 Morocco
-                  </span>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-                  <span className="text-white/60 text-sm">Points Earned</span>
-                  <div className="md:text-right">
-                    <span className="text-yellow-400 font-bold">
-                      {correctWinnerExample} points
-                    </span>
-                    <div className="text-white/40 text-xs font-mono">
-                      {settings.correctResultPoints} - 2 x{' '}
-                      {settings.scoreDifferencePenalty}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-b border-white/10 pb-4">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                  <span className="text-white/60 text-sm">Actual Result</span>
-                  <span className="text-white font-mono">
-                    Netherlands 2 - 2 Japan
-                  </span>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                  <span className="text-white/60 text-sm">Your Prediction</span>
-                  <span className="text-white font-mono">
-                    Netherlands 0 - 0 Japan
-                  </span>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-                  <span className="text-white/60 text-sm">Points Earned</span>
-                  <div className="md:text-right">
-                    <span className="text-yellow-400 font-bold">
-                      {correctDrawExample} points
-                    </span>
-                    <div className="text-white/40 text-xs font-mono">
-                      {settings.correctResultPoints} - 4 x{' '}
-                      {settings.scoreDifferencePenalty}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                  <span className="text-white/60 text-sm">Actual Result</span>
-                  <span className="text-white font-mono">
-                    England 2 - 1 Croatia
-                  </span>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                  <span className="text-white/60 text-sm">Your Prediction</span>
-                  <span className="text-white font-mono">
-                    England 0 - 2 Croatia
-                  </span>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between">
-                  <span className="text-white/60 text-sm">Points Earned</span>
-                  <span className="text-red-400 font-bold">
-                    {wrongResultExample} points
-                  </span>
-                </div>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          </>
         )}
 
         {isAdmin && form && (
@@ -426,130 +273,141 @@ export const Rules = () => {
               <p className="text-sm text-white/50">
                 {locked
                   ? 'Scoring settings are locked.'
-                  : 'Editable until tournament kickoff.'}
+                  : 'Remove rules, add rules, and adjust the deadline.'}
               </p>
             </div>
 
-            <div className="space-y-4">
-              {[
-                ['exactScorePoints', 'Exact score points'],
-                ['correctResultPoints', 'Correct result max points'],
-                ['scoreDifferencePenalty', 'Penalty per missed goal'],
-                ['minimumCorrectResultPoints', 'Minimum correct result points'],
-                ['wrongResultPoints', 'Wrong result points'],
-              ].map(([key, label]) => (
-                <label
-                  key={key}
-                  className="flex items-center justify-between gap-4 text-white/80"
+            <label className="mb-6 block text-white/80">
+              <span className="mb-2 block text-sm text-white/70">
+                Prediction deadline before kickoff, in minutes
+              </span>
+              <input
+                type="number"
+                min={0}
+                max={10080}
+                value={form.predictionDeadlineMinutes}
+                onChange={(event) =>
+                  setForm((current) =>
+                    current
+                      ? {
+                          ...current,
+                          predictionDeadlineMinutes: Math.max(
+                            0,
+                            Math.floor(Number(event.target.value) || 0)
+                          ),
+                        }
+                      : current
+                  )
+                }
+                disabled={locked || saving}
+                className={numberInputClass}
+              />
+            </label>
+
+            <div className="space-y-3">
+              {formRules.map(([ruleId, rule]) => (
+                <div
+                  key={ruleId}
+                  className="grid gap-3 rounded-lg border border-white/10 p-3 md:grid-cols-[auto_1fr_1fr_5rem_auto]"
                 >
-                  <span>{label}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={99}
-                    value={form[key as NumericScoringField]}
+                  <label className="flex items-center gap-2 text-white/80">
+                    <input
+                      type="checkbox"
+                      checked={rule.enabled}
+                      onChange={(event) =>
+                        updateRule(ruleId, { enabled: event.target.checked })
+                      }
+                      disabled={locked || saving}
+                    />
+                    On
+                  </label>
+                  <select
+                    value={rule.type}
                     onChange={(event) =>
-                      handleNumberChange(
-                        key as NumericScoringField,
-                        event.target.value
-                      )
+                      updateRule(ruleId, {
+                        type: event.target.value as ScoringFormulaRuleType,
+                      })
+                    }
+                    disabled={locked || saving}
+                    className={inputClass}
+                  >
+                    {formulaRuleOptions.map((option) => (
+                      <option key={option.type} value={option.type}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={rule.label}
+                    onChange={(event) =>
+                      updateRule(ruleId, { label: event.target.value })
                     }
                     disabled={locked || saving}
                     className={inputClass}
                   />
-                </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={99}
+                    value={rule.points}
+                    onChange={(event) =>
+                      updateRule(ruleId, {
+                        points: Math.max(
+                          0,
+                          Math.floor(Number(event.target.value) || 0)
+                        ),
+                      })
+                    }
+                    disabled={locked || saving}
+                    className={numberInputClass}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => removeRule(ruleId)}
+                    disabled={locked || saving}
+                  >
+                    Remove
+                  </Button>
+                </div>
               ))}
             </div>
 
-            <div className="mt-6 pt-6 border-t border-white/10">
-              <h3 className="font-semibold text-white mb-4">Bonus Rules</h3>
-
-              <div className="flex flex-col md:flex-row gap-3">
-                <select
-                  value={newBonusType}
-                  onChange={(event) =>
-                    setNewBonusType(event.target.value as BonusRuleType)
-                  }
-                  disabled={locked || saving}
-                  className="flex-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:border-white/40 disabled:opacity-50"
-                >
-                  {bonusRuleOptions.map((option) => (
-                    <option key={option.type} value={option.type}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={0}
-                  max={99}
-                  value={newBonusPoints}
-                  onChange={(event) =>
-                    setNewBonusPoints(
-                      Math.max(0, Math.floor(Number(event.target.value) || 0))
-                    )
-                  }
-                  disabled={locked || saving}
-                  className={inputClass}
-                />
-                <Button
-                  type="button"
-                  onClick={handleAddBonusRule}
-                  disabled={locked || saving}
-                >
-                  Add
-                </Button>
-              </div>
-
-              {formBonusRules.length > 0 && (
-                <div className="mt-4 space-y-3">
-                  {formBonusRules.map(([ruleId, rule]) => (
-                    <div
-                      key={ruleId}
-                      className="flex flex-col md:flex-row md:items-center gap-3 text-white/80"
-                    >
-                      <label className="flex flex-1 items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={rule.enabled}
-                          onChange={(event) =>
-                            handleBonusRuleChange(ruleId, {
-                              enabled: event.target.checked,
-                            })
-                          }
-                          disabled={locked || saving}
-                        />
-                        <span>{rule.label}</span>
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={99}
-                        value={rule.points}
-                        onChange={(event) =>
-                          handleBonusRuleChange(ruleId, {
-                            points: Math.max(
-                              0,
-                              Math.floor(Number(event.target.value) || 0)
-                            ),
-                          })
-                        }
-                        disabled={locked || saving}
-                        className={inputClass}
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => handleRemoveBonusRule(ruleId)}
-                        disabled={locked || saving}
-                        className="text-sm"
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="mt-6 grid gap-3 border-t border-white/10 pt-6 md:grid-cols-[1fr_6rem_auto]">
+              <select
+                value={newRuleType}
+                onChange={(event) =>
+                  setNewRuleType(event.target.value as ScoringFormulaRuleType)
+                }
+                disabled={locked || saving}
+                className={inputClass}
+              >
+                {formulaRuleOptions.map((option) => (
+                  <option key={option.type} value={option.type}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={0}
+                max={99}
+                value={newRulePoints}
+                onChange={(event) =>
+                  setNewRulePoints(
+                    Math.max(0, Math.floor(Number(event.target.value) || 0))
+                  )
+                }
+                disabled={locked || saving}
+                className={numberInputClass}
+              />
+              <Button
+                type="button"
+                onClick={addRule}
+                disabled={locked || saving}
+              >
+                Add Rule
+              </Button>
             </div>
 
             {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
@@ -558,7 +416,7 @@ export const Rules = () => {
               <Button
                 type="button"
                 onClick={() => void handleSave()}
-                disabled={locked || saving}
+                disabled={locked || saving || formRules.length === 0}
               >
                 {saving ? 'Saving...' : 'Save Rules'}
               </Button>
