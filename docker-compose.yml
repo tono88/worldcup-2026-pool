@@ -9,7 +9,7 @@ services:
     container_name: worldcup-2026-pool
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-8080}:3000"
+      - "${WEB_PORT:-8090}:3000"
     volumes:
       - worldcup-2026-pool-data:/data
     environment:

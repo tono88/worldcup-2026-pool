@@ -194,7 +194,7 @@ cp docker.env.example .env
 docker compose up -d --build
 ```
 
-By default the app is exposed on `http://localhost:8080`. In CasaOS, use
+By default the app is exposed on `http://localhost:8090`. In CasaOS, use
 `casaos-compose.yml` as a custom app compose file. No Firebase credentials are
 required for the local CasaOS install.
 
