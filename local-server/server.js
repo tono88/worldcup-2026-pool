@@ -398,11 +398,21 @@ const fetchFifaMatches = async (from, to) => {
   url.searchParams.set('idseason', FIFA_SEASON_ID);
   url.searchParams.set('idcompetition', FIFA_COMPETITION_ID);
   url.searchParams.set('count', '500');
-  if (from) url.searchParams.set('from', from.toISOString());
-  if (to) url.searchParams.set('to', to.toISOString());
+  if (from) url.searchParams.set('from', from.toISOString().slice(0, 10));
+  if (to) url.searchParams.set('to', to.toISOString().slice(0, 10));
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`FIFA API error: ${response.status}`);
-  const data = await response.json();
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`FIFA API error: ${response.status} ${body.slice(0, 120)}`);
+  }
+
+  let data;
+  try {
+    data = JSON.parse(body);
+  } catch (error) {
+    throw new Error(`FIFA API returned non-JSON response: ${body.slice(0, 120)}`);
+  }
+
   return data.Results || [];
 };
 
@@ -416,13 +426,7 @@ const initializeMatchesIfMissing = async () => {
 };
 
 const updateScoresFromFifa = async () => {
-  const now = new Date();
-  const from = new Date(now);
-  from.setHours(0, 0, 0, 0);
-  const to = new Date(now);
-  to.setHours(23, 59, 59, 999);
-
-  const fifaMatches = await fetchFifaMatches(from, to);
+  const fifaMatches = await fetchFifaMatches();
   let changed = 0;
 
   for (const fifaMatch of fifaMatches) {
@@ -803,7 +807,10 @@ const handleApi = async (req, res, url) => {
 };
 
 const serveStatic = (req, res, url) => {
-  const safePath = path.normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
+  const pathname = url.pathname === '/' ? '/index.html' : url.pathname;
+  const safePath = path
+    .normalize(decodeURIComponent(pathname))
+    .replace(/^(\.\.[/\\])+/, '');
   let filePath = path.join(PUBLIC_DIR, safePath);
 
   if (!filePath.startsWith(PUBLIC_DIR)) {
@@ -812,6 +819,10 @@ const serveStatic = (req, res, url) => {
 
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     filePath = path.join(PUBLIC_DIR, 'index.html');
+  }
+
+  if (!fs.existsSync(filePath)) {
+    return text(res, 404, 'Frontend build not found. Rebuild the Docker image.');
   }
 
   const ext = path.extname(filePath);
@@ -830,8 +841,14 @@ const serveStatic = (req, res, url) => {
       '.woff2': 'font/woff2',
     }[ext] || 'application/octet-stream';
 
-  res.writeHead(200, { 'Content-Type': mime });
-  fs.createReadStream(filePath).pipe(res);
+  res.writeHead(200, {
+    'Content-Type': mime,
+    'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=604800',
+  });
+
+  const stream = fs.createReadStream(filePath);
+  stream.on('error', () => text(res, 404, 'File not found'));
+  stream.pipe(res);
 };
 
 const server = http.createServer((req, res) => {
