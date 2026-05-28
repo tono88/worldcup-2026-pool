@@ -12,6 +12,7 @@ services:
       - worldcup-2026-pool-data:/data
     environment:
       FIFA_UPDATE_INTERVAL_SECONDS: "60"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
 
 volumes:
   worldcup-2026-pool-data:
