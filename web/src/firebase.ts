@@ -1,8 +1,9 @@
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getDatabase } from 'firebase/database';
-import { getStorage } from 'firebase/storage';
+import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
+import { getDatabase, type Database } from 'firebase/database';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
+import { isLocalBackend } from './config';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
@@ -16,18 +17,17 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID as string,
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-export const analytics = getAnalytics(app);
+const app = isLocalBackend ? null : initializeApp(firebaseConfig);
+export const analytics = app ? getAnalytics(app) : null;
 
 // Initialize Auth
-export const auth = getAuth(app);
+export const auth = (app ? getAuth(app) : null) as Auth;
 export const googleProvider = new GoogleAuthProvider();
 
 // Initialize Realtime Database
-export const db = getDatabase(app);
+export const db = (app ? getDatabase(app) : null) as Database;
 
 // Initialize Storage
-export const storage = getStorage(app);
+export const storage = (app ? getStorage(app) : null) as FirebaseStorage;
 
 export default app;

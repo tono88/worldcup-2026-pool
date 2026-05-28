@@ -1,9 +1,8 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { signInWithPopup, signOut } from 'firebase/auth';
 import { useNavigate, Link } from 'react-router-dom';
-import { auth, googleProvider } from '../../firebase';
 import { sidebarMenuBg } from '../../assets';
+import { isLocalBackend } from '../../config';
 import { useAuth } from '../../hooks/useAuth';
 import { useLeague } from '../../hooks/useLeague';
 import { subscribeToLeaderboard, type UserWithId } from '../../services';
@@ -21,7 +20,7 @@ type UserMenuProps = {
 
 export const UserMenu = ({ mobile = false }: UserMenuProps) => {
   const navigate = useNavigate();
-  const { user, userData } = useAuth();
+  const { user, userData, signIn, signOut } = useAuth();
   const { selectedLeague, leagueMemberIds } = useLeague();
   const [isOpen, setIsOpen] = React.useState(false);
   const [allUsers, setAllUsers] = React.useState<UserWithId[]>([]);
@@ -63,7 +62,7 @@ export const UserMenu = ({ mobile = false }: UserMenuProps) => {
   }, [userData, navigate]);
 
   const handleSignOut = () => {
-    signOut(auth)
+    signOut()
       .then(() => {
         void navigate('/');
       })
@@ -92,7 +91,7 @@ export const UserMenu = ({ mobile = false }: UserMenuProps) => {
 
   const handleSignIn = () => {
     justSignedIn.current = true;
-    signInWithPopup(auth, googleProvider).catch((error) => {
+    signIn().catch((error) => {
       justSignedIn.current = false;
       console.error(error);
     });
@@ -102,11 +101,10 @@ export const UserMenu = ({ mobile = false }: UserMenuProps) => {
   if (!user) {
     return (
       <Button onClick={handleSignIn} className={mobile ? 'text-xs' : 'w-full'}>
-        {mobile ? 'Sign In' : 'Sign In with Google'}
+        {mobile ? 'Sign In' : isLocalBackend ? 'Sign In' : 'Sign In with Google'}
       </Button>
     );
   }
-  console.log({ user });
   return (
     <div ref={buttonRef} className="relative">
       <Button

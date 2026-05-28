@@ -1,5 +1,7 @@
 import { get, onValue, ref, set, type Unsubscribe } from 'firebase/database';
 import { db } from '../firebase';
+import { isLocalBackend } from '../config';
+import { localApi, poll } from './localApi';
 import type { MatchesData } from './matchService';
 
 export interface ScoringSettings {
@@ -155,6 +157,13 @@ export const isScoringLocked = (
 export const getScoringSettings = async (
   fallbackTournamentStartAt?: number
 ): Promise<ScoringSettings> => {
+  if (isLocalBackend) {
+    return normalizeScoringSettings(
+      await localApi.getScoringSettings(),
+      fallbackTournamentStartAt
+    );
+  }
+
   const snapshot = await get(ref(db, 'settings/scoring'));
   return normalizeScoringSettings(
     snapshot.exists() ? (snapshot.val() as Partial<ScoringSettings>) : null,
@@ -165,8 +174,20 @@ export const getScoringSettings = async (
 export const subscribeToScoringSettings = (
   callback: (settings: ScoringSettings) => void,
   fallbackTournamentStartAt?: number
-): Unsubscribe =>
-  onValue(ref(db, 'settings/scoring'), (snapshot) => {
+): Unsubscribe => {
+  if (isLocalBackend) {
+    return poll(
+      async () =>
+        normalizeScoringSettings(
+          await localApi.getScoringSettings(),
+          fallbackTournamentStartAt
+        ),
+      callback,
+      10000
+    );
+  }
+
+  return onValue(ref(db, 'settings/scoring'), (snapshot) => {
     callback(
       normalizeScoringSettings(
         snapshot.exists() ? (snapshot.val() as Partial<ScoringSettings>) : null,
@@ -174,11 +195,17 @@ export const subscribeToScoringSettings = (
       )
     );
   });
+};
 
 export const saveScoringSettings = async (
   settings: ScoringSettings,
   userId: string
 ): Promise<void> => {
+  if (isLocalBackend) {
+    await localApi.saveScoringSettings(settings, userId);
+    return;
+  }
+
   await set(ref(db, 'settings/scoring'), {
     exactScorePoints: settings.exactScorePoints,
     correctResultPoints: settings.correctResultPoints,

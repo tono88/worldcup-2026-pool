@@ -1,11 +1,23 @@
 import React from 'react';
-import { type User, onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../firebase';
-import { handleUserLogin, joinLeague, isLeagueMember, type UserData } from '../services';
-import { AuthContext } from './AuthContext';
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+} from 'firebase/auth';
+import { isLocalBackend } from '../config';
+import { auth, googleProvider } from '../firebase';
+import {
+  handleUserLogin,
+  isLeagueMember,
+  joinLeague,
+  type UserData,
+} from '../services';
+import { localApi, type LocalUser } from '../services/localApi';
+import { AuthContext, type AppUser } from './AuthContext';
 
-// Join intent storage key and helpers
 const JOIN_INTENT_KEY = 'pendingJoinLeague';
+const PENDING_LEAGUE_KEY = 'pendingSelectedLeague';
+const LOCAL_USER_KEY = 'worldcupLocalUserId';
 
 type JoinIntent = {
   leagueId: string;
@@ -27,9 +39,6 @@ const clearJoinIntent = (): void => {
   localStorage.removeItem(JOIN_INTENT_KEY);
 };
 
-// Store league ID to select after join
-const PENDING_LEAGUE_KEY = 'pendingSelectedLeague';
-
 export const setPendingSelectedLeague = (leagueId: string): void => {
   localStorage.setItem(PENDING_LEAGUE_KEY, leagueId);
 };
@@ -45,39 +54,69 @@ export const clearPendingSelectedLeague = (): void => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [user, setUser] = React.useState<User | null>(null);
+  const [user, setUser] = React.useState<AppUser | null>(null);
   const [userData, setUserData] = React.useState<UserData | null>(null);
   const [loading, setLoading] = React.useState(true);
 
+  const processJoinIntent = React.useCallback(async (currentUser: AppUser) => {
+    const joinIntent = getJoinIntent();
+    if (!joinIntent) return;
+
+    try {
+      const alreadyMember = await isLeagueMember(
+        joinIntent.leagueId,
+        currentUser.uid
+      );
+      if (!alreadyMember) {
+        await joinLeague(joinIntent.leagueId, currentUser.uid);
+      }
+      setPendingSelectedLeague(joinIntent.leagueId);
+      window.location.href = `/league/${joinIntent.slug}`;
+    } catch (err) {
+      console.error('Error processing join intent:', err);
+    } finally {
+      clearJoinIntent();
+    }
+  }, []);
+
+  const setLocalSession = React.useCallback(
+    async (session: { user: LocalUser; userData: UserData }) => {
+      localStorage.setItem(LOCAL_USER_KEY, session.user.uid);
+      setUser(session.user);
+      setUserData(session.userData);
+      await processJoinIntent(session.user);
+    },
+    [processJoinIntent]
+  );
+
   React.useEffect(() => {
+    if (isLocalBackend) {
+      const userId = localStorage.getItem(LOCAL_USER_KEY);
+
+      if (!userId) {
+        setLoading(false);
+        return;
+      }
+
+      localApi
+        .getSession(userId)
+        .then(setLocalSession)
+        .catch(() => {
+          localStorage.removeItem(LOCAL_USER_KEY);
+          setUser(null);
+          setUserData(null);
+        })
+        .finally(() => setLoading(false));
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
         handleUserLogin(currentUser)
           .then(async (data) => {
             setUserData(data);
-
-            // Check for pending join intent
-            const joinIntent = getJoinIntent();
-            if (joinIntent) {
-              try {
-                const alreadyMember = await isLeagueMember(
-                  joinIntent.leagueId,
-                  currentUser.uid
-                );
-                if (!alreadyMember) {
-                  await joinLeague(joinIntent.leagueId, currentUser.uid);
-                }
-                // Store league ID to be selected after redirect
-                setPendingSelectedLeague(joinIntent.leagueId);
-                // Redirect to the league page
-                window.location.href = `/league/${joinIntent.slug}`;
-              } catch (err) {
-                console.error('Error processing join intent:', err);
-              } finally {
-                clearJoinIntent();
-              }
-            }
+            await processJoinIntent(currentUser);
           })
           .catch((error: unknown) => {
             console.error('Error fetching user data:', error);
@@ -93,12 +132,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     return () => unsubscribe();
+  }, [processJoinIntent, setLocalSession]);
+
+  const signIn = React.useCallback(
+    async (displayName?: string) => {
+      if (isLocalBackend) {
+        const name = displayName?.trim() || window.prompt('Display name') || '';
+        if (!name.trim()) return;
+        const session = await localApi.signIn(name.trim());
+        await setLocalSession(session);
+        return;
+      }
+
+      await signInWithPopup(auth, googleProvider);
+    },
+    [setLocalSession]
+  );
+
+  const signOut = React.useCallback(async () => {
+    if (isLocalBackend) {
+      localStorage.removeItem(LOCAL_USER_KEY);
+      setUser(null);
+      setUserData(null);
+      return;
+    }
+
+    await firebaseSignOut(auth);
   }, []);
 
   const value = {
     user,
     userData,
     loading,
+    signIn,
+    signOut,
     setUserData,
   };
 

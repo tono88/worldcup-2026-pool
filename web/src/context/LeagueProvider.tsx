@@ -1,6 +1,7 @@
 import React from 'react';
 import { onValue, ref } from 'firebase/database';
 import { db } from '../firebase';
+import { isLocalBackend } from '../config';
 import { useAuth } from '../hooks';
 import { subscribeToUserLeagues, subscribeToLeagueMembers } from '../services';
 import type { League } from '../services';
@@ -134,6 +135,7 @@ export const LeagueProvider = ({ children }: { children: React.ReactNode }) => {
 
   // Subscribe to selected league's data for real-time updates (name, image, etc.)
   React.useEffect(() => {
+    if (isLocalBackend) return;
     if (!selectedLeagueId) return;
 
     const leagueRef = ref(db, `leagues/${selectedLeagueId}`);

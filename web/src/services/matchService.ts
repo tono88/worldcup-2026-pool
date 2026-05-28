@@ -1,5 +1,7 @@
 import { db } from '../firebase';
 import { ref, get, set } from 'firebase/database';
+import { isLocalBackend } from '../config';
+import { localApi } from './localApi';
 
 const FIFA_API_URL = 'https://api.fifa.com/api/v3/calendar/matches';
 const SEASON_ID = '285023'; // 2026 World Cup
@@ -188,6 +190,10 @@ const transformFifaData = (results: FifaApiMatch[]): MatchesData => {
  * If matches don't exist, fetch from FIFA API and initialize
  */
 export const fetchMatches = async (): Promise<MatchesData> => {
+  if (isLocalBackend) {
+    return localApi.getMatches();
+  }
+
   const matchesRef = ref(db, 'matches');
   const snapshot = await get(matchesRef);
 
@@ -211,6 +217,10 @@ export const fetchMatches = async (): Promise<MatchesData> => {
  * Useful for updating scores during the tournament
  */
 export const refreshMatches = async (): Promise<MatchesData> => {
+  if (isLocalBackend) {
+    return localApi.refreshMatches();
+  }
+
   const matches = await fetchFromFifaApi();
   const matchesRef = ref(db, 'matches');
   await set(matchesRef, matches);
@@ -221,6 +231,10 @@ export const refreshMatches = async (): Promise<MatchesData> => {
  * Get a single match by game number
  */
 export const getMatch = async (gameNumber: string): Promise<Match | null> => {
+  if (isLocalBackend) {
+    return localApi.getMatch(gameNumber);
+  }
+
   const matchRef = ref(db, `matches/${gameNumber}`);
   const snapshot = await get(matchRef);
 

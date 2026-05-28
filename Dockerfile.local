@@ -1,0 +1,26 @@
+FROM node:24-alpine AS build
+
+WORKDIR /app/web
+
+COPY web/package*.json ./
+RUN npm ci
+
+COPY web/ ./
+ENV VITE_DATA_BACKEND=local
+ENV VITE_API_BASE_URL=/api
+RUN npm run build
+
+FROM node:24-alpine
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV DATA_DIR=/data
+WORKDIR /app
+
+COPY local-server ./local-server
+COPY --from=build /app/web/dist ./local-server/public
+
+VOLUME ["/data"]
+EXPOSE 3000
+
+CMD ["node", "--no-warnings", "local-server/server.js"]

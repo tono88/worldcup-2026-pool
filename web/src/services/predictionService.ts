@@ -1,5 +1,7 @@
 import { db } from '../firebase';
 import { ref, get, set, onValue, type Unsubscribe } from 'firebase/database';
+import { isLocalBackend } from '../config';
+import { localApi, poll } from './localApi';
 
 export interface Prediction {
   homePrediction: number;
@@ -18,6 +20,10 @@ export interface UserPredictions {
 export const getUserPredictions = async (
   userId: string
 ): Promise<UserPredictions> => {
+  if (isLocalBackend) {
+    return localApi.getUserPredictions(userId);
+  }
+
   const predictionsRef = ref(db, `predictions/${userId}`);
   const snapshot = await get(predictionsRef);
 
@@ -35,6 +41,10 @@ export const getPrediction = async (
   userId: string,
   gameId: number
 ): Promise<Prediction | null> => {
+  if (isLocalBackend) {
+    return localApi.getPrediction(userId, gameId);
+  }
+
   const predictionRef = ref(db, `predictions/${userId}/${gameId}`);
   const snapshot = await get(predictionRef);
 
@@ -54,6 +64,16 @@ export const savePrediction = async (
   homePrediction: number,
   awayPrediction: number
 ): Promise<void> => {
+  if (isLocalBackend) {
+    await localApi.savePrediction(
+      userId,
+      gameId,
+      homePrediction,
+      awayPrediction
+    );
+    return;
+  }
+
   const predictionRef = ref(db, `predictions/${userId}/${gameId}`);
 
   const prediction: Prediction = {
@@ -73,6 +93,10 @@ export const subscribeToPredictions = (
   userId: string,
   callback: (predictions: UserPredictions) => void
 ): Unsubscribe => {
+  if (isLocalBackend) {
+    return poll(() => localApi.getUserPredictions(userId), callback);
+  }
+
   const predictionsRef = ref(db, `predictions/${userId}`);
 
   return onValue(predictionsRef, (snapshot) => {

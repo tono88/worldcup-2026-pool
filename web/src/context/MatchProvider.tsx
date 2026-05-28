@@ -1,6 +1,8 @@
 import React from 'react';
 import { ref, onValue } from 'firebase/database';
 import { db } from '../firebase';
+import { isLocalBackend } from '../config';
+import { poll } from '../services/localApi';
 import { fetchMatches, type MatchesData } from '../services/matchService';
 import { MatchContext } from './MatchContext';
 
@@ -13,6 +15,17 @@ export const MatchProvider: React.FC<{ children: React.ReactNode }> = ({
   const fetchAttemptedRef = React.useRef(false);
 
   React.useEffect(() => {
+    if (isLocalBackend) {
+      return poll(
+        fetchMatches,
+        (data) => {
+          setMatches(data);
+          setLoading(false);
+        },
+        15000
+      );
+    }
+
     const matchesRef = ref(db, 'matches');
 
     // Set up real-time listener

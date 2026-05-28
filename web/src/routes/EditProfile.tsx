@@ -1,7 +1,5 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signOut } from 'firebase/auth';
-import { auth } from '../firebase';
 import {
   AppLayout,
   Card,
@@ -24,7 +22,7 @@ import {
 
 export const EditProfile = () => {
   const navigate = useNavigate();
-  const { user, userData, setUserData } = useAuth();
+  const { user, userData, setUserData, signOut } = useAuth();
   const { showToast } = useToast();
   const { showConfirm, ConfirmDialogComponent } = useConfirm();
   const [userName, setUserName] = React.useState(userData?.userName ?? '');
@@ -175,7 +173,7 @@ export const EditProfile = () => {
     setDeleting(true);
     try {
       await deleteUserAccount(user.uid, userData.userName);
-      await signOut(auth);
+      await signOut();
       showToast('Account deleted successfully', 'success');
       void navigate('/', { replace: true });
     } catch (err) {

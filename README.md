@@ -177,10 +177,10 @@ firebase deploy --only functions
 
 ## Docker / CasaOS
 
-This project can be run in CasaOS with Docker Compose. The web container serves
-the Vite build through Nginx. The optional `score-worker` container polls the
-FIFA match API every minute and writes scores/points to Firebase using a service
-account.
+This project can be run in CasaOS with Docker Compose using a local SQLite
+database. The container serves the Vite build and the local API from the same
+Node process, stores data in the `worldcup-2026-pool-data` Docker volume, and
+polls the FIFA match API every minute.
 
 1. Copy the Docker environment template:
 
@@ -188,27 +188,15 @@ account.
 cp docker.env.example .env
 ```
 
-2. Fill in the Firebase web values and `FIREBASE_DATABASE_URL`.
-
-3. Create a Firebase service account JSON in Firebase Console and save it at:
-
-```text
-secrets/firebase-service-account.json
-```
-
-4. Start the stack:
+2. Start the stack:
 
 ```bash
 docker compose up -d --build
 ```
 
-By default the app is exposed on `http://localhost:8080`. In CasaOS, use the
-contents of `docker-compose.yml` as a custom app compose file and provide the
-same environment values.
-
-If you deploy Firebase Functions instead, `updateMatchScores` already runs every
-minute in Firebase. Do not run both the Firebase scheduled function and the
-CasaOS `score-worker` unless you intentionally want redundant polling.
+By default the app is exposed on `http://localhost:8080`. In CasaOS, use
+`casaos-compose.yml` as a custom app compose file. No Firebase credentials are
+required for the local CasaOS install.
 
 ## Scoring Rules
 

@@ -14,6 +14,8 @@ import {
   uploadBytes,
   getDownloadURL,
 } from 'firebase/storage';
+import { isLocalBackend } from '../config';
+import { fileToDataUrl, localApi, poll } from './localApi';
 
 export interface League {
   name: string;
@@ -56,6 +58,11 @@ export const generateSlug = (name: string): string => {
  * Check if a slug is available
  */
 export const checkSlugAvailable = async (slug: string): Promise<boolean> => {
+  if (isLocalBackend) {
+    const result = await localApi.checkSlugAvailable(slug);
+    return result.available;
+  }
+
   const slugRef = ref(db, `leagueSlugs/${slug}`);
   const snapshot = await get(slugRef);
   return !snapshot.exists();
@@ -72,6 +79,10 @@ export const createLeague = async (
     description?: string;
   }
 ): Promise<LeagueWithId> => {
+  if (isLocalBackend) {
+    return localApi.createLeague(name, ownerId, options);
+  }
+
   // Use provided slug or generate one from name
   let slug = options?.slug ? generateSlug(options.slug) : generateSlug(name);
 
@@ -116,6 +127,10 @@ export const createLeague = async (
 export const getLeagueBySlug = async (
   slug: string
 ): Promise<LeagueWithId | null> => {
+  if (isLocalBackend) {
+    return localApi.getLeagueBySlug(slug);
+  }
+
   const slugRef = ref(db, `leagueSlugs/${slug}`);
   const slugSnapshot = await get(slugRef);
 
@@ -139,6 +154,10 @@ export const getLeagueBySlug = async (
 export const getLeagueByInviteCode = async (
   inviteCode: string
 ): Promise<LeagueWithId | null> => {
+  if (isLocalBackend) {
+    return localApi.getLeagueByInviteCode(inviteCode);
+  }
+
   const leaguesRef = ref(db, 'leagues');
   const snapshot = await get(leaguesRef);
 
@@ -161,6 +180,11 @@ export const joinLeague = async (
   leagueId: string,
   userId: string
 ): Promise<void> => {
+  if (isLocalBackend) {
+    await localApi.joinLeague(leagueId, userId);
+    return;
+  }
+
   await set(ref(db, `leagueMembers/${leagueId}/${userId}`), true);
   await set(ref(db, `userLeagues/${userId}/${leagueId}`), true);
 };
@@ -172,6 +196,11 @@ export const leaveLeague = async (
   leagueId: string,
   userId: string
 ): Promise<void> => {
+  if (isLocalBackend) {
+    await localApi.leaveLeague(leagueId, userId);
+    return;
+  }
+
   await remove(ref(db, `leagueMembers/${leagueId}/${userId}`));
   await remove(ref(db, `userLeagues/${userId}/${leagueId}`));
 };
@@ -180,6 +209,10 @@ export const leaveLeague = async (
  * Get members of a league
  */
 export const getLeagueMembers = async (leagueId: string): Promise<string[]> => {
+  if (isLocalBackend) {
+    return localApi.getLeagueMembers(leagueId);
+  }
+
   const membersRef = ref(db, `leagueMembers/${leagueId}`);
   const snapshot = await get(membersRef);
 
@@ -195,6 +228,10 @@ export const subscribeToLeagueMembers = (
   leagueId: string,
   callback: (memberIds: string[]) => void
 ): Unsubscribe => {
+  if (isLocalBackend) {
+    return poll(() => localApi.getLeagueMembers(leagueId), callback);
+  }
+
   const membersRef = ref(db, `leagueMembers/${leagueId}`);
 
   return onValue(membersRef, (snapshot) => {
@@ -213,6 +250,11 @@ export const isLeagueMember = async (
   leagueId: string,
   userId: string
 ): Promise<boolean> => {
+  if (isLocalBackend) {
+    const result = await localApi.isLeagueMember(leagueId, userId);
+    return result.member;
+  }
+
   const memberRef = ref(db, `leagueMembers/${leagueId}/${userId}`);
   const snapshot = await get(memberRef);
   return snapshot.exists();
@@ -225,6 +267,10 @@ export const subscribeToUserLeagues = (
   userId: string,
   callback: (leagues: LeagueWithId[]) => void
 ): Unsubscribe => {
+  if (isLocalBackend) {
+    return poll(() => localApi.getUserLeagues(userId), callback);
+  }
+
   const userLeaguesRef = ref(db, `userLeagues/${userId}`);
 
   return onValue(userLeaguesRef, async (snapshot) => {
@@ -264,6 +310,11 @@ export const subscribeToUserLeagues = (
 export const regenerateInviteCode = async (
   leagueId: string
 ): Promise<string> => {
+  if (isLocalBackend) {
+    const result = await localApi.regenerateInviteCode(leagueId);
+    return result.inviteCode;
+  }
+
   const newCode = generateInviteCode();
   await update(ref(db, `leagues/${leagueId}`), { inviteCode: newCode });
   return newCode;
@@ -282,6 +333,11 @@ export const updateLeague = async (
   },
   oldSlug?: string
 ): Promise<void> => {
+  if (isLocalBackend) {
+    await localApi.updateLeague(leagueId, { ...updates, oldSlug });
+    return;
+  }
+
   const filteredUpdates: Record<string, string> = {};
   if (updates.name !== undefined) filteredUpdates.name = updates.name;
   if (updates.description !== undefined)
@@ -313,6 +369,12 @@ export const uploadLeagueImage = async (
   leagueId: string,
   file: File
 ): Promise<string> => {
+  if (isLocalBackend) {
+    const imageURL = await fileToDataUrl(file);
+    await localApi.updateLeague(leagueId, { imageURL });
+    return imageURL;
+  }
+
   const extension = file.name.split('.').pop() ?? 'jpg';
   const fileRef = storageRef(
     storage,
@@ -334,6 +396,10 @@ export const uploadLeagueImage = async (
 export const getLeaguesOwnedByUser = async (
   userId: string
 ): Promise<LeagueWithId[]> => {
+  if (isLocalBackend) {
+    return localApi.getLeaguesOwnedByUser(userId);
+  }
+
   const leaguesRef = ref(db, 'leagues');
   const snapshot = await get(leaguesRef);
 
@@ -358,6 +424,11 @@ export const deleteLeague = async (
   leagueId: string,
   slug: string
 ): Promise<void> => {
+  if (isLocalBackend) {
+    await localApi.deleteLeague(leagueId);
+    return;
+  }
+
   // Get all members first so we can clean up userLeagues
   const memberIds = await getLeagueMembers(leagueId);
 

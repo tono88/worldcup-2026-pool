@@ -1,8 +1,7 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { signInWithPopup } from 'firebase/auth';
-import { auth, googleProvider } from '../firebase';
 import { bgImage, worldcupLogo } from '../assets';
+import { isLocalBackend } from '../config';
 import { AppLayout, Button, Card, LeaguePicture } from '../components';
 import { useAuth, useLeague } from '../hooks';
 import {
@@ -36,7 +35,7 @@ export const JoinLeague = () => {
     inviteCode: string;
   }>();
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, signIn } = useAuth();
   const { setSelectedLeague } = useLeague();
 
   const [league, setLeague] = React.useState<LeagueWithId | null>(null);
@@ -120,7 +119,7 @@ export const JoinLeague = () => {
     });
 
     setSigningIn(true);
-    signInWithPopup(auth, googleProvider).catch((err) => {
+    signIn().catch((err) => {
       console.error('Sign in error:', err);
       setSigningIn(false);
       clearJoinIntent();
@@ -215,7 +214,11 @@ export const JoinLeague = () => {
               disabled={signingIn}
               className="w-full"
             >
-              {signingIn ? 'Signing in...' : 'Sign In with Google'}
+              {signingIn
+                ? 'Signing in...'
+                : isLocalBackend
+                  ? 'Join locally'
+                  : 'Sign In with Google'}
             </Button>
           </Card>
         </div>

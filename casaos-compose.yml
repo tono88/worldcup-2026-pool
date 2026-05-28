@@ -2,11 +2,19 @@ name: worldcup-2026-pool
 
 services:
   web:
-    image: ghcr.io/tono88/worldcup-2026-pool-web:latest
+    image: ghcr.io/tono88/worldcup-2026-pool-local:latest
     container_name: worldcup-2026-pool
+    pull_policy: always
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "8080:3000"
+    volumes:
+      - worldcup-2026-pool-data:/data
+    environment:
+      FIFA_UPDATE_INTERVAL_SECONDS: "60"
+
+volumes:
+  worldcup-2026-pool-data:
 
 x-casaos:
   architectures:
@@ -21,6 +29,6 @@ x-casaos:
   title:
     en_us: World Cup 2026 Pool
   description:
-    en_us: Self-hosted frontend for the FIFA World Cup 2026 prediction pool.
+    en_us: Self-hosted FIFA World Cup 2026 prediction pool with local SQLite storage.
   port_map: "8080"
   index: /

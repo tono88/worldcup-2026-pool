@@ -15,6 +15,8 @@ import {
   getDownloadURL,
 } from 'firebase/storage';
 import type { User } from 'firebase/auth';
+import { isLocalBackend } from '../config';
+import { fileToDataUrl, localApi, poll } from './localApi';
 
 export interface UserData {
   email: string;
@@ -78,6 +80,11 @@ export const sanitizeUsername = (input: string): string => {
 };
 
 export const handleUserLogin = async (user: User) => {
+  if (isLocalBackend) {
+    const session = await localApi.getSession(user.uid);
+    return session.userData;
+  }
+
   const userRef = ref(db, `users/${user.uid}`);
   const snapshot = await get(userRef);
 
@@ -127,6 +134,11 @@ export const checkUsernameAvailable = async (
   // Check if username is reserved
   if (RESERVED_USERNAMES.includes(normalized)) return false;
 
+  if (isLocalBackend) {
+    const result = await localApi.checkUsername(userName, currentUid);
+    return result.available;
+  }
+
   const usernameRef = ref(db, `usernames/${normalized}`);
   const snapshot = await get(usernameRef);
 
@@ -164,6 +176,14 @@ export const updateUserProfile = async (
   const normalizedNew = normalizeUsername(newUserName);
   const normalizedOld = oldUserName ? normalizeUsername(oldUserName) : '';
 
+  if (isLocalBackend) {
+    await localApi.updateUserProfile(uid, {
+      userName: newUserName,
+      displayName: data.displayName,
+    });
+    return;
+  }
+
   // If normalized username is changing, verify it's available and update the index
   if (normalizedOld && normalizedOld !== normalizedNew) {
     if (isReservedUsername(newUserName)) {
@@ -196,6 +216,10 @@ export const updateUserProfile = async (
 export const getUserByUsername = async (
   userName: string
 ): Promise<{ id: string; data: UserData } | null> => {
+  if (isLocalBackend) {
+    return localApi.getUserByUsername(userName);
+  }
+
   const normalized = normalizeUsername(userName);
   const usernameRef = ref(db, `usernames/${normalized}`);
   const snapshot = await get(usernameRef);
@@ -224,6 +248,12 @@ export const uploadProfilePicture = async (
   uid: string,
   file: File
 ): Promise<string> => {
+  if (isLocalBackend) {
+    const photoURL = await fileToDataUrl(file);
+    await localApi.updateUserProfile(uid, { photoURL });
+    return photoURL;
+  }
+
   // Get file extension from the original file
   const extension = file.name.split('.').pop() ?? 'jpg';
 
@@ -256,6 +286,10 @@ export interface UserWithId extends UserData {
 export const subscribeToLeaderboard = (
   callback: (users: UserWithId[]) => void
 ): (() => void) => {
+  if (isLocalBackend) {
+    return poll(localApi.getLeaderboard, callback);
+  }
+
   const usersRef = ref(db, 'users');
   const unsubscribe = onValue(usersRef, (snapshot) => {
     const data = snapshot.val() as Record<string, UserData> | null;
@@ -282,6 +316,11 @@ export const deleteUserAccount = async (
   uid: string,
   userName: string
 ): Promise<void> => {
+  if (isLocalBackend) {
+    await localApi.deleteUserAccount(uid);
+    return;
+  }
+
   const normalizedUsername = normalizeUsername(userName);
 
   // Get user's leagues to leave them
