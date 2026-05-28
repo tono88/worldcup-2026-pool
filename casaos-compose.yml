@@ -1,0 +1,26 @@
+name: worldcup-2026-pool
+
+services:
+  web:
+    image: ghcr.io/tono88/worldcup-2026-pool-web:latest
+    container_name: worldcup-2026-pool
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: web
+  category: Web
+  developer: tono88
+  author: tono88
+  tagline:
+    en_us: FIFA World Cup 2026 prediction pool
+  title:
+    en_us: World Cup 2026 Pool
+  description:
+    en_us: Self-hosted frontend for the FIFA World Cup 2026 prediction pool.
+  port_map: "8080"
+  index: /
